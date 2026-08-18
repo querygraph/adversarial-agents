@@ -62,7 +62,7 @@ RUN uv venv "${UV_PROJECT_ENVIRONMENT}" \
     && uv pip install \
         "crewai>=1.15,<2" "langchain>=1.3,<2" "langgraph>=1.2,<2" \
         "pydantic-ai-slim>=2.31,<3" "pytest>=8" "pytest-asyncio>=1" "pyyaml>=6" \
-    && uv pip install --no-deps .
+    && uv pip install --no-deps -e .
 
 ENTRYPOINT ["scripts/docker-entry.sh"]
 CMD ["benchmark"]
