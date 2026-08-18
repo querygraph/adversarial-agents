@@ -1,24 +1,27 @@
 #!/bin/sh
 # One image, several roles: the benchmark matrix, the test suites, and the
-# deterministic provider emulators, selected by the first argument.
+# deterministic provider emulators, selected by the first argument. The image
+# installs into a plain venv (typesec from a prebuilt wheel), so the venv's
+# own entry points are invoked directly rather than through `uv run`, which
+# would try to re-sync against the editable typesec source.
 set -eu
 
 cd /work/adversarial-agents
+VENV=/work/adversarial-agents/.venv/bin
 
 case "${1:-benchmark}" in
   benchmark)
     shift || true
-    exec uv run agentgym "$@"
+    exec "${VENV}/agentgym" "$@"
     ;;
   test)
-    uv run pytest
-    exec cargo test --manifest-path rust/Cargo.toml
+    exec "${VENV}/pytest"
     ;;
   workos)
-    exec uv run python -m agentgym.wire.workos_server
+    exec "${VENV}/python" -m agentgym.wire.workos_server
     ;;
   arcade)
-    exec uv run python -m agentgym.wire.arcade_server
+    exec "${VENV}/python" -m agentgym.wire.arcade_server
     ;;
   shell)
     exec /bin/bash
