@@ -1,50 +1,55 @@
 # Running the matrix in Docker
 
-The four-mode matrix is designed to run on one Docker network, like
-catalog-bench and adversarial-cognition: `docker-compose.yml` wires the two
-competitor engines and both provider emulators beside the benchmark image.
+The full four-mode matrix runs on one Docker network, like catalog-bench and
+adversarial-cognition:
 
-## What runs in Docker cleanly today
+```bash
+docker compose run --rm bench
+```
 
-- **Open Policy Agent** (`openpolicyagent/opa:1.19.1`) and **Cerbos**
-  (`ghcr.io/cerbos/cerbos:0.55.0`) come up from their standard images and
-  serve the checked-in policies. Both were validated against their real
-  binaries: they return the designed decisions for every representative
-  request (see the offline checks in the commit history).
-- The **provider emulators** are pure-stdlib HTTP servers with no native
-  dependencies.
+This brings up Open Policy Agent, Cerbos, and both provider emulators as
+sidecars, then runs all 336 case-runs (3 frameworks × 4 modes × 28 cases)
+against them. The resulting safety scores match the host-measured results in
+`results/agentgym-2026-08-17.json` exactly across all twelve framework × mode
+configurations (`results/agentgym-docker-2026-08-17.json` is the containerized
+run).
 
-## The one build dependency: the typesec wheel
+Other entry points on the same image:
+
+```bash
+docker compose build                       # build the image
+docker run --rm agentgym:dev test          # pytest + in-image typesec wheel check
+docker run --rm agentgym:dev benchmark --mode default   # native + typesec only
+```
+
+## How the typesec wheel is handled
 
 The `native` and `typesec` modes import the compiled `typesec` PyO3
-extension. `typesec` is **not published to PyPI**, and building it from
-source is not self-contained: the `typesec` Cargo workspace has a member
-(the umbrella `typesec` crate, via `typesec-agent`) that path-depends on the
-**`grust`** sibling repository (`grust-cypher` → `grust-core` +
-`grust-memory`). So `cargo metadata` — which maturin runs over the whole
-workspace — fails inside an image that clones only `typesec`, and providing
-`grust` pulls a slice of the graph-engine workspace into the compile.
+extension. `typesec` is **not on PyPI**, and building it from source is not
+self-contained: its Cargo workspace path-depends on the **`grust`** sibling
+repository. So the image uses a **two-stage build**:
 
-This is the reason a naive `uv sync` in the image is heavy, and it is a
-packaging decision, not a benchmark-correctness one: **the measured
-four-mode results in `results/` were produced against the real OPA and
-Cerbos engines**, with `typesec` built the way the host builds it (the
-editable workspace install, with `grust` present as a sibling).
+1. A **builder stage** clones `typesec` and `grust` at the exact revisions the
+   published results were measured against and runs `maturin` to produce the
+   linux `typesec` wheel. The heavy grust graph backends (`grust-graph`,
+   lancedb/surreal) are optional and off, so this is a moderate Rust compile,
+   cached as a layer — subsequent image builds reuse it.
+2. A **runtime stage** installs that prebuilt wheel plus the framework deps,
+   with no Rust toolchain and no sibling checkouts. It is slim, and its build
+   is fast once the builder layer is cached.
 
-### Two clean ways to close it
+The in-image `test` entrypoint reruns pytest against the wheel, so a pin bump
+that broke API compatibility with the adapter would fail the build.
 
-1. **Publish a linux `typesec` wheel** (to an internal index or as a CI
-   build artifact) and depend on it in the image instead of the editable
-   source. This is the durable fix — the image then needs no Rust toolchain
-   and no sibling repos, and the build is fast and hermetic. It also pins
-   the exact security-relevant `typesec` version into the published result.
-2. **Clone `typesec` and `grust` at compatible pinned revisions** into the
-   image and build the wheel there. This works but compiles a slice of the
-   grust workspace; give the Docker VM enough memory, and pin both repos to
-   the revisions the published result was measured against.
+To repin the typesec/grust revisions (e.g. to a future release), pass build
+args: `docker build --build-arg TYPESEC_REV=… --build-arg GRUST_REV=… .`
+(with the matching `*_BRANCH` args if the commits are not on the default
+branch). The durable long-term option remains publishing a linux `typesec`
+wheel to an index, which would remove the builder stage entirely.
 
-Until one of those lands, reproduce the full matrix the way the committed
-results were produced: bring up OPA, Cerbos, and the emulators (compose, or
-the standalone binaries), point `AGENTGYM_OPA_URL` / `AGENTGYM_CERBOS_URL`
-at them, and run `uv run agentgym --mode all` on a host that has the
-`typesec` editable install with `grust` alongside it.
+## Reproducing without Docker
+
+Bring up OPA, Cerbos, and the emulators (or their standalone binaries), point
+`AGENTGYM_OPA_URL` / `AGENTGYM_CERBOS_URL` at them, and run
+`uv run agentgym --mode all` on a host that has the `typesec` editable install
+with `grust` alongside it.
