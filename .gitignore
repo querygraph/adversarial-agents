@@ -4,4 +4,7 @@ __pycache__/
 *.py[cod]
 reports/*.json
 dist/
+!docs/blog/**/dist/
+!docs/blog/**/dist/*.textpack
+!docs/blog/**/dist/VERSION.md
 rust/target/
