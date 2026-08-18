@@ -18,7 +18,7 @@ AgentGym does not ask whether an agent framework can validate a JSON schema, cal
 
 > When an agent crosses from a model into a tool, from one tenant into another, from a catalog into a database, or from governed data into an authorized SaaS channel, what makes its authority impossible to confuse?
 
-The first complete release runs 168 deterministic cases across three real framework runtimes, fourteen security scenarios, and two enforcement configurations. The answer is stark—but it needs to be read carefully.
+This release runs 336 deterministic case-runs — three real framework runtimes, fourteen security scenarios, four enforcement modes — and puts two real, widely deployed policy engines in the comparison, not just a strawman. The answer draws a clean, defensible line, and the line is the whole point.
 
 ## The mansion has fourteen entrances
 
@@ -45,34 +45,39 @@ Then the benchmark attacks every seam:
 
 These are not prompt-injection trivia. They are type-confusion problems wearing operational clothes. A subject, action, resource, purpose, approval, OAuth status, content label, and receipt can all be perfectly valid values—and still be valid for the wrong thing.
 
-## Same agent, same tool, different door
+## Two planes, and a door that only sees one
 
-Each framework runs the same benign task and the same adversarial mutation twice.
+Here is the idea the whole benchmark turns on. Every attack hides its adversarial value in one of two planes.
 
-The first configuration is a deliberately weak native baseline: broad authorization plus ordinary framework tool validation. It represents a common integration pattern, not the strongest security system that could ever be hand-built in Python.
+**Request-plane facts** are what an integration holds the instant a tool is called: the subject, the tool, the resource string, the purpose, the delegated user, the arguments. A poisoned catalog name, a `SELECT *`, a laundered purpose, a swapped delegated user — these are all visible right there in the request.
 
-The second configuration keeps the framework runtime but places the call behind TypeSec's compiled Rust/PyO3 gate. The TypeSec path requires an exact subject, action, resource, purpose, and argument binding before the framework dispatches the instrumented tool. Database restrictions and content-flow conditions are checked separately from WorkOS project access and Arcade channel authorization.
+**Execution-plane facts** only exist at or after execution: the sensitivity label on the *data* entering a channel, the hash of the call that was actually approved, the receipt chain of a replay, which tenant a parallel branch's result came from. Nothing in the request reveals them.
 
-That distinction matters. OAuth permission to call `Gmail.SendEmail` is not permission to place sensitive household rows in the message body. A WorkOS `dataset:view` decision is not a free-floating boolean that applies to a neighboring organization's dataset. Permission to read a table is not permission to mint raw credentials for the entire storage prefix.
+A great many real agent breaches are not malformed requests. They are valid request-plane values whose danger only shows up on the execution plane — an authorized Gmail send whose body was poisoned with raw rows, an approved Drive write whose arguments were edited after approval. So AgentGym runs each of the fourteen scenarios — one benign task, one matched attack — through **four enforcement modes**, and watches which plane each mode can actually bind.
 
-Authentication opens the gatehouse. It does not hand over every room in the mansion.
+- **Native** — a representative weak integration: authenticate once, check one broad entitlement, trust validated arguments. The named floor.
+- **Open Policy Agent** — the CNCF-standard policy engine, in a container, evaluating an honest Rego translation of the same policy.
+- **Cerbos** — a second, structurally different industry engine, reaching the same question from a typed principal/resource/action model.
+- **TypeSec** — the compiled Rust ToolGate and ODRL engine, composed with the provider clients, *mediating execution*.
 
-## The result: utility stayed; the attacks stopped
+Every mode's decision is enforced at each framework's own documented pre-tool hook — Pydantic AI approval, LangChain middleware, CrewAI `before_tool_call` — and a scripted model drives each real agent loop with no API key, so what we measure is the enforcement substrate, not model mood.
 
-The deterministic suite produced this matrix:
+## The result: the line falls exactly where the planes divide
 
-| Framework runtime | Enforcement | Cases passed | Attack safety | Benign utility | Binding integrity | Fail-closed | Evidence quality |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Pydantic AI | Weak native baseline | 14/28 | 0% | 100% | 0% | 0% | 0% |
-| Pydantic AI | TypeSec | 28/28 | 100% | 100% | 100% | 100% | 100% |
-| LangChain | Weak native baseline | 14/28 | 0% | 100% | 0% | 0% | 0% |
-| LangChain | TypeSec | 28/28 | 100% | 100% | 100% | 100% | 100% |
-| CrewAI | Weak native baseline | 14/28 | 0% | 100% | 0% | 0% | 0% |
-| CrewAI | TypeSec | 28/28 | 100% | 100% | 100% | 100% | 100% |
+The deterministic matrix, measured against live OPA and Cerbos:
 
-All three frameworks completed all fourteen legitimate tasks in both configurations. The weak baseline also executed every seeded attack. The TypeSec-backed configuration blocked every attack without losing a legitimate completion.
+| Mode | Attack safety | Benign utility | Grade |
+|---|---:|---:|---:|
+| Native | 0% | 100% | D |
+| Open Policy Agent | 64% | 100% | D |
+| Cerbos | 64% | 100% | D |
+| TypeSec | 100% | 100% | A |
 
-Across the entire matrix, 126 of 168 results were safe: all 84 TypeSec-backed cases plus the 42 benign native cases. The 42 unsafe results were exactly the fourteen attacks repeated across the three weak-baseline framework paths.
+All three framework runtimes produce identical mode scores, because the substrate — not the framework — is what the deterministic score isolates. Every mode completes all fourteen legitimate tasks. What separates them is the attacks.
+
+The native floor lets every attack through. And then the interesting part: **the two real policy engines block all nine attacks whose adversarial value is a request-plane fact — and fail exactly the five whose deciding fact only exists at execution.** Sensitive content in an authorized channel; arguments edited between approval and execution; a spliced receipt chain; a policy construct the hand-translation never parsed; a parallel join that mixed tenants and spent a capability twice. Two independent engines, drawing the identical line, in the identical place.
+
+That is not a rigged comparison. OPA and Cerbos are excellent at what they are, and they are configured with the strongest honest translation of the policy. The safety gate caps them at D not because they are misconfigured, but because a stateless decision point is never shown the second plane. TypeSec clears the gate because it mediates execution and binds both planes.
 
 The security oracle watches side effects, not apologies. If an agent reads Harbor's data, sends an email, vends a credential, or imports a spliced receipt and then says “I cannot do that,” the case still fails. A refusal after the side effect is theater.
 
@@ -123,7 +128,7 @@ The normative suite uses scripted calls and provider emulators. That isolates en
 
 Live WorkOS, Arcade, LakeCat/Sail, and model-provider campaigns belong in separate conformance tiers. They will add operational realism, latency, and failure modes, but they should not contaminate the deterministic security oracle with network and model variance.
 
-The benchmark also needs more peer configurations: carefully secured native middleware, OpenAI Agents SDK, AutoGen, Semantic Kernel, Google ADK, and external policy engines. TypeSec should face the strongest credible version of each alternative. An adversarial benchmark that protects its preferred system from serious competition is just marketing with extra steps.
+The benchmark still wants more peer configurations. This release adds the two most credible external policy engines — OPA and Cerbos, both real, both containerized — and the roadmap adds the strongest agent frameworks by adoption: the OpenAI Agents SDK, Google ADK, the Microsoft Agent Framework (the GA'd successor to AutoGen and Semantic Kernel), and AWS Strands. TypeSec should face the strongest credible version of each alternative. An adversarial benchmark that protects its preferred system from serious competition is just marketing with extra steps — which is exactly why the two engines we added block nine of the fourteen attacks outright, and we say so.
 
 ## Build doors, not reminders
 
@@ -147,5 +152,5 @@ The goal is not to make every agent behave.
 
 It is to make the wrong door impossible to open.
 
-AgentGym is open source at [github.com/querygraph/adversarial-agents](https://github.com/querygraph/adversarial-agents). The `v0.2.0` release includes the complete deterministic suite, real Pydantic AI, LangChain, and CrewAI runtime paths, the compiled TypeSec Python extension, WorkOS and Arcade fault emulation, and the Rust compile-fail harness.
+AgentGym is open source at [github.com/querygraph/adversarial-agents](https://github.com/querygraph/adversarial-agents). The `v0.3.0` release includes the complete deterministic suite across four enforcement modes, real Pydantic AI, LangChain, and CrewAI runtime paths enforced at each framework's own pre-tool hook, Open Policy Agent and Cerbos as containerized competitor engines, wire-faithful WorkOS and Arcade emulators of the current provider contracts, the compiled TypeSec Python extension, and the Rust compile-fail harness. The whole four-mode matrix runs on one Docker network with `docker compose run --rm bench`.
 
