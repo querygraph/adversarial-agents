@@ -91,10 +91,17 @@ def gates() -> tuple[ToolGate, TypesecGate]:
     return ToolGate(RBAC, bindings, "rbac"), TypesecGate(ODRL, "odrl")
 
 
-def check_native(principal: Principal, call: ToolCall) -> Decision:
-    """Require the Rust gate to approve the exact call before Python semantics."""
+def check_rust_gate(principal: Principal, call: ToolCall) -> Decision:
+    """Require the compiled Rust gate to approve the exact call first.
+
+    The PyO3 ToolGate decides tool binding and resource presence; for the
+    governed catalog read the ODRL engine additionally decides the purpose
+    constraint. Both run before any Python-side runtime binding, so an
+    unbound tool, a missing resource argument, or a failed ODRL constraint
+    is rejected by compiled Rust, not by the Python layer above it.
+    """
     tool_gate, odrl_gate = gates()
-    arguments = dict(call.arguments)
+    arguments = dict(call.args)
     arguments["__resource"] = call.resource
     verdict = tool_gate.check_tool(
         principal.subject,
@@ -103,12 +110,19 @@ def check_native(principal: Principal, call: ToolCall) -> Decision:
         call.purpose,
     )
     if not verdict.allowed:
-        return Decision(False, f"Rust ToolGate: {verdict.reason}")
+        return Decision(False, f"Rust ToolGate: {verdict.reason}",
+                        mechanism="rust-toolgate", invariant="tool-binding")
     if call.tool == "catalog/query":
         odrl = odrl_gate.check(
             principal.subject, call.action, call.resource, call.purpose
         )
         if not odrl.allowed:
-            return Decision(False, f"Rust ODRL gate: {odrl.reason}")
-    return Decision(True, "Rust ToolGate and policy gate allowed exact call")
+            return Decision(False, f"Rust ODRL gate: {odrl.reason}",
+                            mechanism="rust-odrl", invariant="purpose-binding")
+    return Decision(True, "Rust ToolGate and policy gate allowed exact call",
+                    mechanism="rust-toolgate", invariant="tool-binding")
+
+
+# Retained for older imports.
+check_native = check_rust_gate
 

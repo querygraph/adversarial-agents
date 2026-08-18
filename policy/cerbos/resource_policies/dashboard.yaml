@@ -1,0 +1,14 @@
+# catalog/dashboard — the WorkOS-fronted study dashboard. As a pure
+# decision point Cerbos binds the exact resource; the sibling-resource
+# replay (BG-04 attack) names dataset/harbor-study and is denied.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: dashboard
+  rules:
+    - actions: ["dataset:view"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.id == "dataset/northstar-study"

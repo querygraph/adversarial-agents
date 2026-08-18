@@ -1,0 +1,12 @@
+# parallel/join — branch provenance and capability consumption are
+# execution-plane state a request-time engine never sees. Cerbos allows; the
+# branch-mixing attack (BG-14) executes. Honest boundary of a stateless
+# decision point.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: parallel_join
+  rules:
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]

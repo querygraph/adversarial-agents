@@ -1,0 +1,12 @@
+# policy/evaluate — whether the source policy corpus holds a construct this
+# engine's hand-translation never parsed is invisible at the request. Cerbos
+# allows; the unrepresentable-construct attack (BG-13) executes. A
+# hand-translated competitor policy cannot attest completeness it never had.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: policy_corpus
+  rules:
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]

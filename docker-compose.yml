@@ -1,0 +1,69 @@
+# The full AgentGym matrix on one network, mirroring how catalog-bench and
+# adversarial-cognition run: the benchmark image plus every competitor
+# enforcement engine and both provider emulators as sidecars. `docker
+# compose run --rm bench` runs the four-mode matrix against live OPA,
+# Cerbos, and the wire-faithful WorkOS/Arcade emulators.
+
+services:
+  opa:
+    image: openpolicyagent/opa:1.19.1
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--set=decision_logs.console=false"
+      - "/policies"
+    volumes:
+      - ./policy/opa:/policies:ro
+    healthcheck:
+      test: ["CMD", "opa", "version"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:0.55.0
+    command: ["server", "--config=/config/cerbos.yaml"]
+    volumes:
+      - ./policy/cerbos/resource_policies:/policies:ro
+      - ./policy/cerbos-config:/config:ro
+    healthcheck:
+      # Distroless image: no shell, binary at /cerbos (the entrypoint).
+      test: ["CMD", "/cerbos", "healthcheck"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+  workos:
+    image: agentgym:dev
+    build: .
+    command: ["workos"]
+    environment:
+      AGENTGYM_WORKOS_PORT: "8280"
+
+  arcade:
+    image: agentgym:dev
+    build: .
+    command: ["arcade"]
+    environment:
+      AGENTGYM_ARCADE_PORT: "9099"
+
+  bench:
+    image: agentgym:dev
+    build: .
+    depends_on:
+      opa:
+        condition: service_healthy
+      cerbos:
+        condition: service_healthy
+      workos:
+        condition: service_started
+      arcade:
+        condition: service_started
+    environment:
+      AGENTGYM_OPA_URL: "http://opa:8181"
+      AGENTGYM_CERBOS_URL: "http://cerbos:3592"
+      AGENTGYM_WORKOS_URL: "http://workos:8280"
+      AGENTGYM_ARCADE_URL: "http://arcade:9099"
+    command: ["benchmark", "--mode", "all", "--json"]

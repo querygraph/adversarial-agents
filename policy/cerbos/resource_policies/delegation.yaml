@@ -1,0 +1,17 @@
+# delegate/run — the requested lease and scope are in the request, so
+# Cerbos denies the amplifying delegation (BG-07 attack: ttl 300, scope
+# report/*).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: delegation
+  rules:
+    - actions: ["delegate"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.args.ttl <= 30
+              - expr: request.resource.attr.args.scope == "report/public-summary"

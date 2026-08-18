@@ -1,0 +1,11 @@
+.venv
+.git
+.pytest_cache
+__pycache__
+**/__pycache__
+rust/target
+dist
+docs/blog/*/dist
+*.pyc
+.python-version.local
+policy/opa/data.json.tmp
