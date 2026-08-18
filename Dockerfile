@@ -9,7 +9,11 @@
 
 FROM python:3.13-bookworm
 
-ARG TYPESEC_REV=669e105c294dee0064ec9d54151449b03fcc0c65
+# Pinned to typesec main's 0.13.1 release commit — a stable, fetchable ref
+# exposing the same ToolGate / TypesecGate / validate API the host build
+# uses. The in-image `test` entrypoint reruns pytest to confirm the pinned
+# version stays API-compatible with the adapter.
+ARG TYPESEC_REV=d63789a03cfc0ea1de0f52236454d3f734693d5d
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential curl git pkg-config \
@@ -34,7 +38,12 @@ COPY fixtures ./fixtures
 COPY rust ./rust
 COPY scripts ./scripts
 
-RUN uv sync --extra frameworks --extra test
+# Cache-mounted so a rebuild reuses the resolved framework wheels and the
+# compiled typesec artifacts instead of re-downloading and recompiling.
+ENV UV_LINK_MODE=copy
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/work/typesec/target \
+    uv sync --extra frameworks --extra test
 
 ENTRYPOINT ["scripts/docker-entry.sh"]
 CMD ["benchmark"]
