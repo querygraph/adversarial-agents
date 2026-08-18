@@ -1,0 +1,16 @@
+# approval/execute — the approval store's hash of the call that was actually
+# approved is execution-plane state a request-time engine never sees. Cerbos
+# allows the request that looks correct at the surface; the matching attack,
+# which differs only in that hash, executes. This allow is the honest
+# boundary of a stateless decision point.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: approval
+  rules:
+    - actions: ["execute"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.args.checkpoint == "thread:maya"

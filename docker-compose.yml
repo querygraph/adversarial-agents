@@ -25,8 +25,8 @@ services:
     image: ghcr.io/cerbos/cerbos:0.55.0
     command: ["server", "--config=/config/cerbos.yaml"]
     volumes:
-      - ./policy/cerbos:/policies:ro
-      - ./policy/cerbos/config:/config:ro
+      - ./policy/cerbos/resource_policies:/policies:ro
+      - ./policy/cerbos-config:/config:ro
     healthcheck:
       test: ["CMD", "cerbos", "healthcheck", "--insecure"]
       interval: 3s

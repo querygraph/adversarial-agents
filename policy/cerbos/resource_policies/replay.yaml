@@ -1,0 +1,11 @@
+# replay/import — receipt/outbox chain verification is evidence-plane state a
+# request-time engine never sees. Cerbos allows; the spliced-receipt attack
+# executes. Honest boundary of a stateless decision point.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: replay
+  rules:
+    - actions: ["write"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
