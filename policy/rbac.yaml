@@ -1,0 +1,8 @@
+roles:
+  - name: study_analyst
+    permissions: [read]
+    resources: ["lakecat://northstar/household_energy"]
+assignments:
+  - subject: "user:maya@civic.example"
+    roles: [study_analyst]
+

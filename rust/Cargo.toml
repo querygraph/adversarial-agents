@@ -1,0 +1,10 @@
+[package]
+name = "agentgym-compile-fail"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dev-dependencies]
+trybuild = "1"
+typesec-core = { path = "../../typesec/crates/typesec-core" }
+

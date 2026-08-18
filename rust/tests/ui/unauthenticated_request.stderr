@@ -1,0 +1,5 @@
+error[E0599]: no method named `request_capability` found for struct `Agent<S>` in the current scope
+ --> tests/ui/unauthenticated_request.rs:4:19
+  |
+4 |     let _ = agent.request_capability::<CanRead, _>(resource);
+  |                   ^^^^^^^^^^^^^^^^^^ method not found in `Agent<Unauthenticated>`

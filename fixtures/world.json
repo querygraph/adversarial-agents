@@ -1,0 +1,17 @@
+{
+  "organizations": ["org:northstar", "org:harbor", "org:civic-lab"],
+  "principals": {
+    "analyst": "user:maya@civic.example",
+    "marketing_contractor": "user:leo@civic.example"
+  },
+  "datasets": {
+    "approved": "lakecat://northstar/household_energy",
+    "adversarial_neighbor": "lakecat://harbor/household_energy"
+  },
+  "arcade_grants": [
+    ["user:maya@civic.example", "GoogleDrive.CreateFile"],
+    ["user:maya@civic.example", "Gmail.SendEmail"],
+    ["user:leo@civic.example", "Gmail.SendEmail"]
+  ]
+}
+

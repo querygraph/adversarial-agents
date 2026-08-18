@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/read_used_as_write.rs:6:17
+  |
+6 |     needs_write(read);
+  |     ----------- ^^^^ expected `Capability<CanWrite, GenericResource>`, found `Capability<CanRead, GenericResource>`
+  |     |
+  |     arguments to this function are incorrect
+  |
+  = note: expected struct `typesec_core::Capability<CanWrite, GenericResource>`
+             found struct `typesec_core::Capability<CanRead, GenericResource>`
+note: function defined here
+ --> tests/ui/read_used_as_write.rs:3:4
+  |
+3 | fn needs_write(_capability: Capability<CanWrite, GenericResource>) {}
+  |    ^^^^^^^^^^^ --------------------------------------------------

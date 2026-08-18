@@ -1,0 +1,11 @@
+error: cannot construct `typesec_core::Capability<CanRead, GenericResource>` with struct literal syntax due to private fields
+ --> tests/ui/forge_capability.rs:4:19
+  |
+4 |     let _forged = Capability::<CanRead, GenericResource> {};
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+help: you might have meant to use the `new_minted` associated function
+  |
+4 -     let _forged = Capability::<CanRead, GenericResource> {};
+4 +     let _forged = Capability::<CanRead, GenericResource>::new_minted(_, _, _, _, _, _);
+  |

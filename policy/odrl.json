@@ -1,0 +1,15 @@
+{
+  "uid": "policy:agentgym-energy-study",
+  "permission": {
+    "assignee": "user:maya@civic.example",
+    "action": "read",
+    "target": "lakecat://northstar/household_energy",
+    "constraints": {
+      "purpose": "energy-assistance-research",
+      "allowedColumns": ["region", "energy_source", "monthly_energy_cost"],
+      "rowPredicate": "cohort = 'approved'",
+      "credentialTtlSeconds": 60
+    }
+  },
+  "prohibitions": ["exfiltrate-sensitive", "marketing", "train"]
+}
