@@ -25,22 +25,37 @@ providers, native-Python and TypeSec-founded modes, a CLI, and executable tests.
 
 ## Current build status
 
-The deterministic suite is implemented for BG-01 through BG-14. It includes
-paired benign/attack cases, side-effect oracles, fake WorkOS and Arcade
-providers with failure injection, shared RBAC/ODRL/world fixtures, real
-deterministic tool execution through Pydantic AI, LangChain, and CrewAI, the
-compiled TypeSec Rust/PyO3 `ToolGate` and ODRL gate, concurrent isolation tests,
-and Rust compile-fail cases for unforgeability, typestate, permission mismatch,
-and sensitive reveal.
+The deterministic suite is implemented for BG-01 through BG-14 across **four
+enforcement modes** — `native`, `opa`, `cerbos`, and `typesec` — with the
+request-plane / execution-plane split described in
+[docs/EXPLANATION.md](docs/EXPLANATION.md) as its organizing idea. It
+includes paired benign/attack cases; a side-effect oracle that is the sole
+ground truth; **wire-faithful WorkOS and Arcade emulators** implementing the
+current provider contracts (WorkOS `/authorization/*`, Arcade `/v1/tools/*`)
+with fault injection; a single fixture-derived world model shared by every
+gate, engine policy, and the oracle; real deterministic tool execution
+through Pydantic AI, LangChain, and CrewAI enforced at **each framework's own
+documented pre-tool hook**; the compiled TypeSec Rust/PyO3 `ToolGate` and ODRL
+gate; per-case plain-language explanations in the report; concurrent
+isolation tests; and Rust compile-fail cases for unforgeability, typestate,
+permission mismatch, and sensitive reveal.
+
+Two industry policy engines run as real containers — **Open Policy Agent** and
+**Cerbos** — evaluating the strongest honest translation of the world's
+constraints. They block every attack whose adversarial value is a
+request-plane fact and fail exactly the execution-plane ones; that boundary,
+drawn with real engines, is the benchmark's central result. The whole matrix
+runs on one Docker network (`docker compose run --rm bench`), mirroring the
+catalog-bench and adversarial-cognition packaging.
 
 The `native` track is intentionally a named weak baseline: broad authorization
 plus framework tool validation. It is not a claim that the peer frameworks
 cannot be secured with carefully written middleware. The `typesec` track uses
-the same framework runtime and instrumented tool but requires the real Rust gate
-and exact Python-side boundary invariants before dispatch. Live WorkOS, Arcade,
-LakeCat/Sail, and model-provider campaigns remain opt-in conformance work because
-they require external services or larger sibling-stack processes; deterministic
-CI uses emulators and must remain the normative security score.
+the same framework runtime and instrumented tool but mediates execution, so it
+binds the runtime facts a stateless decision point cannot. Live WorkOS,
+Arcade, LakeCat/Sail, and model-provider campaigns remain opt-in conformance
+work; deterministic CI uses emulators and containers and remains the normative
+security score.
 
 ## Goal in one sentence
 
@@ -153,6 +168,36 @@ This is not a ranking of framework quality in general. It isolates enforcement
 under adversarial boundary crossings. Human approval and output guardrails are
 recorded as defenses, but approval is not treated as proof that a subject,
 resource, purpose, or downstream side effect was correctly bound.
+
+### Framework coverage: implemented and roadmap (verified 2026-08-17)
+
+The current build implements three runtimes, each enforced at its own
+documented pre-tool interception point and driven by a keyless scripted
+model: **Pydantic AI** 2.x (`FunctionModel`; approval-gated tool),
+**LangChain/LangGraph** 1.x (`GenericFakeChatModel`; tool-wrapping
+middleware), and **CrewAI** 1.15+ (`BaseLLM`; `@before_tool_call` hook).
+
+To claim coverage of "the strongest, most widely used agents," the roadmap
+adds — in priority order, each with a keyless deterministic model path and a
+real tool-authorization surface confirmed against current docs:
+
+1. **OpenAI Agents SDK** (`openai-agents`, ~39M downloads/mo) — custom
+   `Model`/`ModelProvider`; `tool_input_guardrail` + `needs_approval`.
+2. **Google ADK** (`google-adk` 2.x, ~22M/mo) — custom `BaseLlm`;
+   `before_tool_callback` + `require_confirmation`.
+3. **Microsoft Agent Framework** (`agent-framework` 1.x, the GA'd successor
+   unifying Semantic Kernel + AutoGen) — `BaseChatClient` subclass; function
+   middleware (`FunctionInvocationContext`) + `approval_mode`.
+4. **AWS Strands Agents** (`strands-agents`) — custom `Model`; interruptible
+   `BeforeToolCallEvent`. Completes coverage of all three hyperscaler stacks.
+
+Legacy AutoGen and Semantic Kernel are covered transitively by the Microsoft
+Agent Framework successor and are not separate targets. LlamaIndex and
+smolagents are out of scope for a tool-authorization benchmark: LlamaIndex
+exposes no framework-level pre-tool authorization surface (HITL is DIY
+events), and smolagents' code-writing paradigm makes "tool authorization" a
+sandbox/import-policy question belonging to a separate code-execution track.
+CrewAI pins `<3.14`, which is the ceiling of the benchmark's Python 3.13 CI.
 
 ## Canonical world: QG Energy Cooperative
 
@@ -485,8 +530,27 @@ Model behavior is controlled in three tiers:
 
 ## WorkOS and Arcade emulation
 
-Deterministic fake servers expose the documented provider shapes but also
-support fault injection:
+The emulators implement the **current** provider contracts at the
+HTTP-message level (verified against live docs and official SDK sources on
+2026-08-17), not a simplified shape:
+
+- **WorkOS** speaks the re-architected authorization API,
+  `POST /authorization/organization_memberships/{id}/check` with a
+  `permission_slug` and a resource addressed by external ID + type slug,
+  returning `{"authorized": bool}` under Bearer `sk_...` auth. The
+  Warrant-derived `/fga/v1/*` API it replaced (deprecated 2025-11-15)
+  returns `410 Gone`, so an integration still on the old contract fails
+  loudly. (The 2026 WorkOS Agents API and AuthKit-for-MCP authorization
+  server are noted for a future identity-track expansion.)
+- **Arcade** speaks `/v1/tools/authorize`, `/v1/auth/status` (long-poll),
+  and `/v1/tools/execute`, with Arcade's raw-key `Authorization` header (no
+  `Bearer` prefix), the `not_started|pending|completed|failed` status enum,
+  and the typed `output.error.kind` enum (e.g. `TOOL_REQUIREMENTS_NOT_MET`)
+  on an unauthorized execute.
+
+Each emulator serves in-process for the unit suite and over real HTTP inside
+the Docker network; the enforcement code above the client cannot tell which
+transport served it. Fault injection covers:
 
 - correct allow/deny;
 - delayed response and timeout;

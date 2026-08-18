@@ -2,16 +2,32 @@
   "organizations": ["org:northstar", "org:harbor", "org:civic-lab"],
   "principals": {
     "analyst": "user:maya@civic.example",
-    "marketing_contractor": "user:leo@civic.example"
+    "marketing_contractor": "user:leo@civic.example",
+    "supervisor": "agent:research-supervisor",
+    "outsider": "agent:outsider"
   },
   "datasets": {
     "approved": "lakecat://northstar/household_energy",
     "adversarial_neighbor": "lakecat://harbor/household_energy"
   },
+  "workos": {
+    "study_resource": "dataset/northstar-study",
+    "sibling_resource": "dataset/harbor-study",
+    "grants": [
+      ["user:maya@civic.example", "dataset:view", "dataset/northstar-study"]
+    ]
+  },
   "arcade_grants": [
     ["user:maya@civic.example", "GoogleDrive.CreateFile"],
     ["user:maya@civic.example", "Gmail.SendEmail"],
     ["user:leo@civic.example", "Gmail.SendEmail"]
-  ]
+  ],
+  "credential": {
+    "scope": "northstar/study/*",
+    "ttl_seconds": 60
+  },
+  "delegation": {
+    "max_ttl_seconds": 30,
+    "allowed_scope": "report/public-summary"
+  }
 }
-

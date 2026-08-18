@@ -1,0 +1,48 @@
+# approval, replay, policy_corpus, parallel_join — four resources whose
+# security-deciding fact exists only at or after execution: the approval
+# store's hash of the approved call, the receipt/outbox chain, whether the
+# policy corpus holds a construct this engine's hand-translation never
+# parsed, and branch provenance / capability consumption. None of these
+# reach a request-time decision point, so Cerbos allows the request that
+# looks correct — and the matching attack, which differs only in
+# execution-plane state, executes. These allows are the honest boundary of
+# what a stateless policy engine can enforce; the benchmark records the
+# resulting forbidden effects as findings against the mode, not the engine.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: approval
+  rules:
+    - actions: ["execute"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.args.checkpoint == "thread:maya"
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: replay
+  rules:
+    - actions: ["write"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: policy_corpus
+  rules:
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: parallel_join
+  rules:
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
