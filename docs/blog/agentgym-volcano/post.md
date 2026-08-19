@@ -93,11 +93,53 @@ The repaired scorer makes the missing data visible:
 - grade A also requires 100% verified evidence quality, so a safe-looking
   implementation with absent or forged receipts cannot earn the top grade.
 
-This methodology revision intentionally leaves the numeric score table to the
-final provenance-bearing Docker report. The table must be generated from that
-artifact rather than copied from an intermediate run. Even then, the eight
-profiles compare only the configurations checked into this repository; they do
-not establish an OPA or Cerbos ceiling.
+The final [schema-v2 Docker report](https://github.com/querygraph/adversarial-agents/blob/master/results/agentgym-docker-2026-08-19.json)
+contains 846 applicable case-runs and 24 score records. Pydantic AI,
+LangChain, and CrewAI produced the same score vector, so the tables show each
+profile once rather than repeating identical rows three times.
+
+| Profile | Passed | Safety | Utility | Grade |
+| --- | ---: | ---: | ---: | :---: |
+| Native | 21/38 | 0.0% | 100.0% | D |
+| WorkOS | 22/33 | 35.7% | 100.0% | D |
+| Arcade | 23/35 | 21.4% | 100.0% | D |
+| OPA | 23/28 | 64.3% | 100.0% | D |
+| Cerbos | 23/28 | 64.3% | 100.0% | D |
+| OPA-mediated | 40/40 | 100.0% | 100.0% | A |
+| Cerbos-mediated | 40/40 | 100.0% | 100.0% | A |
+| TypeSec | 40/40 | 100.0% | 100.0% | A |
+
+| Profile | Exact binding | Fault closure | Verified evidence |
+| --- | ---: | ---: | ---: |
+| Native | 0.0% | 70.0% | 0.0% |
+| WorkOS | 0.0% | 60.0% | 0.0% |
+| Arcade | 0.0% | 85.7% | 0.0% |
+| OPA | 0.0% | n/a | 0.0% |
+| Cerbos | 0.0% | n/a | 0.0% |
+| OPA-mediated | 100.0% | 100.0% | 100.0% |
+| Cerbos-mediated | 100.0% | 100.0% | 100.0% |
+| TypeSec | 100.0% | 100.0% | 100.0% |
+
+`n/a` means the profile had no applicable provider-fault trial; it is not a
+perfect score. The raw and provider-only rows are intentionally incomplete
+compositions. Their D grades reflect missing exact-call binding and verified
+positive evidence as well as escaped attacks.
+
+The most useful result is the parity at the bottom of the tables. Giving OPA
+or Cerbos the same last-moment state mediator and verified execution permit
+closes the runtime gap in this corpus. TypeSec reaches the same 40/40 runtime
+result while also supplying the separate Rust construction-safety measurement.
+This supports a claim about mediation and exact authority—not a claim that a
+policy engine is intrinsically incapable of secure integration.
+
+The report was generated with seed 0 from clean benchmark commit
+`75fc75caf9616b4a7d68b81ee4005c816d86b37d` in image
+`sha256:97bc0e2e3435ec4f16447ea670c5070070236d5467f9e8882afccc6ccbdede08`.
+Its SHA-256 is
+`9f1680c26dea33ba9c22308ed15273b5be5f2170ecff841c19108989f41f7495`.
+The eight profiles compare only the configurations checked into this
+repository; they do not establish an OPA, Cerbos, WorkOS, Arcade, or framework
+ceiling.
 
 The security oracle still watches side effects, not apologies. If an agent
 reads Harbor's data, sends an email, vends a credential, or imports a spliced

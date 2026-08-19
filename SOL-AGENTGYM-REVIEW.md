@@ -233,18 +233,89 @@ rejects missing or incompatible metadata.
 
 ## Completion evidence
 
-This section will be updated during execution with commit-local commands, result
-counts, hashes, and any explicitly deferred external administration such as GitHub
-branch-protection settings.
+The audited Docker artifact was built from clean commit
+`75fc75caf9616b4a7d68b81ee4005c816d86b37d` as image
+`sha256:97bc0e2e3435ec4f16447ea670c5070070236d5467f9e8882afccc6ccbdede08`.
+The resulting `results/agentgym-docker-2026-08-19.json` contains 846 rows and
+24 scores, passes `validate_provenance`, and has SHA-256
+`9f1680c26dea33ba9c22308ed15273b5be5f2170ecff841c19108989f41f7495`.
 
-- [ ] Boundary security regressions pass.
-- [ ] Real framework hook regressions pass.
-- [ ] Raw and mediated policy-engine profiles run.
-- [ ] Stateful boundary attacks run.
-- [ ] WorkOS and Arcade fault/attack profiles are scored.
-- [ ] Metric adversary tests pass.
-- [ ] Standalone wheel smoke test passes.
-- [ ] Rust compile-fail and receipt tests pass.
-- [ ] Policy regeneration is clean.
-- [ ] Reports reproduce with complete provenance.
-- [ ] Local CI-equivalent and Docker validation pass.
+- [x] Boundary security regressions pass.
+- [x] Real framework hook regressions pass.
+- [x] Raw and mediated policy-engine profiles run.
+- [x] Stateful boundary attacks run.
+- [x] WorkOS and Arcade fault/attack profiles are scored.
+- [x] Metric adversary tests pass.
+- [x] Standalone wheel smoke test passes.
+- [x] Rust compile-fail and receipt tests pass.
+- [x] Policy regeneration is clean.
+- [x] Reports reproduce with complete provenance.
+- [x] Local CI-equivalent and Docker validation pass.
+
+### Finding-by-finding acceptance record
+
+- **R1:** `test_security_boundary.py` and `test_framework_hooks.py` cover deep
+  immutability, closed wire decoding, post-authorization swaps, exact-call
+  permits, and zero effects on mismatch across all framework paths.
+- **R2:** Pydantic AI deferred approvals, registered LangChain middleware, and
+  CrewAI's public pre-tool dispatcher are invoked by the tested execution path;
+  independent deny hooks stop effects.
+- **R3:** the PyO3 `AgentGymGate` and opaque `ExecutionPermit` are rechecked at
+  the effect boundary. Direct calls, duck-typed permits, changed calls/policies,
+  expiry, revocation, and reuse are denied. The TypeSec profile passes 40/40.
+- **R4:** raw `opa`/`cerbos` and equal-state `opa-mediated`/
+  `cerbos-mediated` profiles are separate report rows. Canonical mediated input
+  equality is regression-tested; both mediated profiles pass 40/40.
+- **R5:** approvals, receipts, branch capabilities, policy state, and restricted
+  database effects come from per-gate trusted stores with atomic single-use
+  consumption. Replay, splice, self-authorization, and incomplete-join tests
+  fail closed.
+- **R6:** receipts cover the full call digest, allow decision, policy digest,
+  issuer, issue/expiry times, and intended use. Cross-tool/action/argument,
+  policy, expiry, byte mutation, and replay tests reject forged evidence.
+- **R7:** metric goldens cover allow-all, deny-all, forged evidence, incorrect
+  results, and explicit provider faults. Binding/evidence credit only verified
+  successful allows; fault closure is nullable when unmeasured.
+- **R8:** WorkOS and Arcade are first-class modes with request-scoped HTTP fault
+  injection. Twelve fault cases cover timeouts, malformed/wrong types, stale
+  grants, wrong resources/users, replayed completion, and execute-time binding.
+- **R9:** packaged RBAC and ODRL are the canonical corpus. OPA/Cerbos outputs are
+  generated from it, their drift checks pass, every row records corpus digest
+  `10c91cca971a14f8690e3180834e2aa27ae64a2a999383640ac4421f4c601b10`,
+  and BG-06 varies only trusted execution evidence.
+- **R10:** provider and nested runtime schemas reject non-objects, duplicate or
+  unknown fields, string booleans, non-finite/negative TTLs, malformed labels,
+  and invalid nested capabilities as typed deny decisions.
+- **R11:** `scripts/check.sh` builds both 0.3.0 wheels, installs the portable
+  wheel and its declared framework dependencies in an isolated environment, runs
+  native mode, verifies packaged resources and the precise missing-companion
+  error, then resolves the local protected extra.
+- **R12:** GitHub Actions gates Python/Rust tests, policy drift, both wheel
+  smokes, the installed Docker suite, the full matrix, and per-profile
+  thresholds. The final container suite passes 274 tests. Enabling repository
+  branch protection remains the explicit administrator action after merge.
+- **R13:** schema-v2 provenance records seed, canonical command and selection,
+  clean commit state, corpus digests, dependency/service versions, TypeSec
+  revisions, platform, and image IDs. The validator accepts the final artifact
+  and rejects missing or incompatible metadata.
+
+### Commands and measured outcomes
+
+- `uv run pytest -q`: 269 passed, 5 service-only tests skipped on the host.
+- `docker compose run --rm bench test`: 274 passed against all four live
+  services from the installed image.
+- `cargo test --locked --manifest-path rust/Cargo.toml`: four compile-fail UI
+  cases passed.
+- `cargo test --locked --manifest-path native/Cargo.toml`: four native receipt
+  and permit tests passed.
+- `scripts/check.sh`: frozen locks, generated-policy drift, Python/Rust suites,
+  protected threshold, both wheel builds, standalone native execution, and
+  protected-extra resolution passed.
+- A second full Docker matrix from the same commit, image, services, seed, and
+  command was byte-identical to the committed report; both files hashed to
+  `9f1680c26dea33ba9c22308ed15273b5be5f2170ecff841c19108989f41f7495`.
+- The complete matrix is 28 benign/adversarial scenario cases plus 12 scoped
+  fault trials: 282 applicable rows per framework, 846 total. All three
+  frameworks produced identical scores. OPA-mediated, Cerbos-mediated, and
+  TypeSec each scored 100% on safety, utility, binding, fault closure, and
+  verified evidence; provider/raw profiles retain their measured limitations.
