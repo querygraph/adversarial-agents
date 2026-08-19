@@ -66,12 +66,10 @@ Every mode's decision is enforced at each framework's own documented pre-tool ho
 
 The deterministic matrix, measured against live OPA and Cerbos:
 
-| Mode | Attack safety | Benign utility | Grade |
-|---|---:|---:|---:|
-| Native | 0% | 100% | D |
-| Open Policy Agent | 64% | 100% | D |
-| Cerbos | 64% | 100% | D |
-| TypeSec | 100% | 100% | A |
+- **Native:** 0% attack safety · 100% benign utility · grade D
+- **Open Policy Agent:** 64% attack safety · 100% benign utility · grade D
+- **Cerbos:** 64% attack safety · 100% benign utility · grade D
+- **TypeSec:** 100% attack safety · 100% benign utility · grade A
 
 All three framework runtimes produce identical mode scores, because the substrate — not the framework — is what the deterministic score isolates. Every mode completes all fourteen legitimate tasks. What separates them is the attacks.
 
@@ -153,4 +151,3 @@ The goal is not to make every agent behave.
 It is to make the wrong door impossible to open.
 
 AgentGym is open source at [github.com/querygraph/adversarial-agents](https://github.com/querygraph/adversarial-agents). The `v0.3.0` release includes the complete deterministic suite across four enforcement modes, real Pydantic AI, LangChain, and CrewAI runtime paths enforced at each framework's own pre-tool hook, Open Policy Agent and Cerbos as containerized competitor engines, wire-faithful WorkOS and Arcade emulators of the current provider contracts, the compiled TypeSec Python extension, and the Rust compile-fail harness. The whole four-mode matrix runs on one Docker network with `docker compose run --rm bench`.
-
