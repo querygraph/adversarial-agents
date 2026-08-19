@@ -15,7 +15,8 @@ case "${1:-benchmark}" in
     exec "${VENV}/agentgym" "$@"
     ;;
   test)
-    exec "${VENV}/pytest"
+    shift
+    exec "${VENV}/pytest" "$@"
     ;;
   workos)
     exec "${VENV}/python" -m agentgym.wire.workos_server

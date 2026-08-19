@@ -14,11 +14,30 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+class ProviderHTTPServer(ThreadingHTTPServer):
+    """Threaded emulator server sized for the benchmark's concurrent track.
+
+    ``TCPServer`` defaults to a listen backlog of only five. A 16-agent burst
+    can overflow that queue before the accept loop schedules its handler
+    threads, which presents as spurious connection resets unrelated to the
+    provider fault being measured.
+    """
+
+    request_queue_size = 128
+    daemon_threads = True
+    block_on_close = False
+    allow_reuse_address = True
+
+
 def _make_handler(emulator):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def _dispatch(self, method: str) -> None:
+            # urllib opens a fresh connection for these deterministic calls;
+            # explicitly close it after one response so idle handler sockets
+            # cannot accumulate during high-concurrency benchmark bursts.
+            self.close_connection = True
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length) if length else b""
             headers = {key: value for key, value in self.headers.items()}
@@ -31,6 +50,7 @@ def _make_handler(emulator):
             self.send_response(response.status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(payload)
 
@@ -47,6 +67,6 @@ def _make_handler(emulator):
 
 
 def serve(emulator, port: int) -> None:
-    server = ThreadingHTTPServer(("0.0.0.0", port), _make_handler(emulator))
+    server = ProviderHTTPServer(("0.0.0.0", port), _make_handler(emulator))
     print(json.dumps({"listening": port, "emulator": type(emulator).__name__}))
     server.serve_forever()

@@ -6,7 +6,6 @@ import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from http.server import ThreadingHTTPServer
 from threading import Thread
 
 import pytest
@@ -14,14 +13,14 @@ import pytest
 from agentgym.wire import ArcadeClient, ProviderFault, WorkOSClient
 from agentgym.wire.arcade import API_KEY as ARCADE_KEY
 from agentgym.wire.arcade import ArcadeEmulator
-from agentgym.wire.servers import _make_handler
+from agentgym.wire.servers import ProviderHTTPServer, _make_handler
 from agentgym.wire.workos import API_KEY as WORKOS_KEY
 from agentgym.wire.workos import WorkOSEmulator
 
 
 @contextmanager
 def _http_emulator(emulator) -> Iterator[str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(emulator))
+    server = ProviderHTTPServer(("127.0.0.1", 0), _make_handler(emulator))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -134,15 +133,19 @@ def test_workos_http_faults_are_isolated_per_concurrent_client(monkeypatch) -> N
                     "dataset:view",
                     "dataset/northstar-study",
                 )
-            except ProviderFault:
-                return "fault"
+            except ProviderFault as exc:
+                return f"fault:{exc}"
             return "allow" if allowed else "deny"
 
         with ThreadPoolExecutor(max_workers=16) as pool:
             outcomes = list(pool.map(check, range(64)))
 
         assert outcomes == [
-            "fault" if index % 2 else "allow" for index in range(64)
+            (
+                "fault:malformed WorkOS response: authorized must be a boolean"
+                if index % 2 else "allow"
+            )
+            for index in range(64)
         ]
         assert healthy.check(
             "user:maya@civic.example",
@@ -287,15 +290,19 @@ def test_arcade_http_faults_are_isolated_per_concurrent_client(monkeypatch) -> N
             assert client.authorized(user, tool)
             try:
                 allowed = client.execute(user, tool, {})
-            except ProviderFault:
-                return "fault"
+            except ProviderFault as exc:
+                return f"fault:{exc}"
             return "allow" if allowed else "deny"
 
         with ThreadPoolExecutor(max_workers=16) as pool:
             outcomes = list(pool.map(execute, range(64)))
 
         assert outcomes == [
-            "fault" if index % 2 else "allow" for index in range(64)
+            (
+                "fault:Arcade execution response binding mismatch"
+                if index % 2 else "allow"
+            )
+            for index in range(64)
         ]
         assert healthy.authorized(user, tool)
         assert healthy.execute(user, tool, {})
