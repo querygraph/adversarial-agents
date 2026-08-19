@@ -6,5 +6,4 @@ publish = false
 
 [dev-dependencies]
 trybuild = "1"
-typesec-core = { path = "../../typesec/crates/typesec-core" }
-
+typesec-core = "=0.13.1"

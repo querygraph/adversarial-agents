@@ -3,7 +3,8 @@
 ``python -m agentgym.wire.workos_server`` and ``.arcade_server`` run these.
 The handler is the same emulator object the in-process client uses, so the
 compose services and the unit suite exercise identical decision logic; only
-the transport differs.
+the transport differs. Fault selection is request-scoped metadata interpreted
+by ``handle``; the shared server object never carries a benchmark run's fault.
 """
 
 from __future__ import annotations

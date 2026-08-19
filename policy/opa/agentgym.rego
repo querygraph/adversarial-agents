@@ -1,14 +1,10 @@
 # AgentGym decision policy for Open Policy Agent (OPA >= 1.0).
 #
-# This is the strongest honest OPA configuration for the benchmark's world:
-# every constraint that is visible in the canonical dispatch-time request is
-# enforced, with constants read from the same fixtures the rest of the
-# benchmark uses (mounted as data: data.world from fixtures/world.json,
-# data.odrl from policy/odrl.json). What no rule here can see — data-plane
-# content labels, the approval store's hash of the approved call, receipt
-# chains, branch capability consumption — is exactly what a stateless
-# decision point is never shown, and those scenarios are where this mode
-# honestly fails.
+# This is the raw request-time OPA profile. Every constraint visible in the
+# canonical dispatch request is enforced with generated canonical data. The
+# separately reported opa-mediated profile composes an allow from this policy
+# with the common execution-state mediator; raw-profile gaps must not be
+# attributed to an inherent OPA ceiling.
 
 package agentgym
 
@@ -25,10 +21,14 @@ default decision := {
 	"invariant": "unknown-tool-deny",
 }
 
+rbac_allows(request) if {
+	some grant in data.rbac.grants
+	grant == [request.subject, request.action, request.resource]
+}
+
 decision := d if {
 	input.tool == "catalog/query"
-	input.subject == data.world.principals.analyst
-	input.resource == data.world.datasets.approved
+	rbac_allows(input)
 	input.purpose == constraints.purpose
 	count(input.args.columns) > 0
 	every column in input.args.columns {
@@ -45,11 +45,10 @@ decision := d if {
 
 decision := d if {
 	input.tool == "catalog/dashboard"
-	some grant in data.world.workos.grants
-	grant == [input.subject, input.action, input.resource]
+	rbac_allows(input)
 	d := {
 		"allow": true,
-		"reason": "WorkOS grant tuple matches subject, permission, and exact resource",
+		"reason": "canonical RBAC grant matches subject, permission, and exact resource",
 		"invariant": "exact-provider-resource",
 		"proof_id": "opa-dashboard",
 	}
@@ -57,6 +56,7 @@ decision := d if {
 
 decision := d if {
 	input.tool in {"drive/create", "gmail/send"}
+	rbac_allows(input)
 	input.delegated_user == input.subject
 	some grant in data.world.arcade_grants
 	grant == [input.subject, arcade_tool[input.tool]]
@@ -80,7 +80,7 @@ gmail_purpose_ok(request) if {
 
 decision := d if {
 	input.tool == "delegate/run"
-	input.subject == data.world.principals.analyst
+	rbac_allows(input)
 	input.args.ttl <= data.world.delegation.max_ttl_seconds
 	input.args.scope == data.world.delegation.allowed_scope
 	d := {
@@ -93,8 +93,7 @@ decision := d if {
 
 decision := d if {
 	input.tool == "memory/recall"
-	input.subject == data.world.principals.supervisor
-	input.resource == "memory/study-finding"
+	rbac_allows(input)
 	d := {
 		"allow": true,
 		"reason": "durable memory bound to the supervisor identity",
@@ -105,8 +104,7 @@ decision := d if {
 
 decision := d if {
 	input.tool == "approval/execute"
-	input.subject == data.world.principals.analyst
-	input.resource == "drive/create"
+	rbac_allows(input)
 	input.args.checkpoint == "thread:maya"
 	d := {
 		"allow": true,
@@ -118,10 +116,10 @@ decision := d if {
 
 decision := d if {
 	input.tool == "credential/vend"
-	input.subject == data.world.principals.analyst
+	rbac_allows(input)
 	not input.args.raw
 	input.args.scope == data.world.credential.scope
-	input.args.ttl <= data.world.credential.ttl_seconds
+	input.args.ttl <= constraints.credentialTtlSeconds
 	d := {
 		"allow": true,
 		"reason": "scoped, short-lived credential within the governed defaults",
@@ -132,8 +130,7 @@ decision := d if {
 
 decision := d if {
 	input.tool == "replay/import"
-	input.subject == data.world.principals.analyst
-	input.resource == "replay/northstar-study"
+	rbac_allows(input)
 	d := {
 		"allow": true,
 		"reason": "replay import authorized; receipt-chain verification is evidence-plane state this decision point cannot observe",
@@ -144,7 +141,7 @@ decision := d if {
 
 decision := d if {
 	input.tool == "policy/evaluate"
-	input.subject == data.world.principals.analyst
+	rbac_allows(input)
 	d := {
 		"allow": true,
 		"reason": "policy evaluation authorized; this Rego translation cannot attest constructs the source ODRL corpus may hold that Rego never parsed",
@@ -155,7 +152,7 @@ decision := d if {
 
 decision := d if {
 	input.tool == "parallel/join"
-	input.subject == data.world.principals.analyst
+	rbac_allows(input)
 	d := {
 		"allow": true,
 		"reason": "join authorized; branch provenance and capability consumption are execution-plane state this decision point cannot observe",

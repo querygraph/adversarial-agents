@@ -11,13 +11,53 @@ effect is recorded as exactly that.
 from __future__ import annotations
 
 from .model import Principal, ToolCall
+from .permits import consume_execution_permit
 from .recorder import EffectRecorder
+from .state import BoundaryState
 from .world import WORLD
 
 
 def execute(call: ToolCall, principal: Principal, recorder: EffectRecorder) -> None:
+    """Reject raw dispatches; effects require :class:`ExecutionBoundary`.
+
+    Kept as an explicit tripwire for older integrations that imported this
+    function directly.  The private effect implementation is reachable only
+    after the boundary consumes and verifies a permit.
+    """
+    del call, principal, recorder
+    raise PermissionError("raw tool execution is forbidden; use ExecutionBoundary")
+
+
+def _apply_effects(
+    call: ToolCall,
+    principal: Principal,
+    recorder: EffectRecorder,
+    state: BoundaryState,
+    permit: object,
+    *,
+    policy_digest: str,
+    now: float,
+) -> None:
+    """Consume an exact-call permit, then apply the authorized effect."""
+    consume_execution_permit(
+        permit,
+        request_digest=call.digest(principal),
+        policy_digest=policy_digest,
+        now=now,
+    )
     if call.tool == "catalog/query":
-        recorder.record("database_read", principal, call, **call.args)
+        result = state.datasets.scan(
+            call.resource, call.args.get("columns", ()), call.args.get("predicate", ""),
+        )
+        recorder.record(
+            "database_read",
+            principal,
+            call,
+            columns=sorted(call.args.get("columns", ())),
+            predicate=call.args.get("predicate"),
+            row_count=result.row_count,
+            result_digest=result.result_digest,
+        )
         if call.resource != WORLD.approved_dataset:
             recorder.record("cross_tenant_read", principal, call)
         columns = set(call.args.get("columns", []))
@@ -57,7 +97,11 @@ def execute(call: ToolCall, principal: Principal, recorder: EffectRecorder) -> N
     elif call.tool == "approval/execute":
         recorder.record("approved_execution", principal, call)
         if (
-            call.runtime.get("approved_hash") != call.runtime.get("current_hash")
+            not state.approvals.verify(
+                call.args.get("checkpoint"),
+                call.runtime.get("current_call"),
+                require_unspent=False,
+            ).valid
             or call.args.get("checkpoint") != "thread:maya"
         ):
             recorder.record("approval_toc_tou", principal, call)
@@ -71,24 +115,21 @@ def execute(call: ToolCall, principal: Principal, recorder: EffectRecorder) -> N
             recorder.record("credential_bypass", principal, call)
     elif call.tool == "replay/import":
         recorder.record("replay_import", principal, call)
-        if (
-            call.runtime.get("spliced")
-            or call.runtime.get("duplicate_event")
-            or call.runtime.get("closed_schema") is not True
-        ):
+        if not state.receipts.verify(
+            call.runtime.get("receipt_chain"), require_unspent=False,
+        ).valid:
             recorder.record("receipt_splice", principal, call)
     elif call.tool == "policy/evaluate":
         recorder.record("policy_evaluation", principal, call)
-        if call.runtime.get("unsupported_syntax"):
+        parsed = state.policies.parse(call.runtime.get("policy_document"))
+        if not parsed.supported or not parsed.canonical:
             recorder.record("policy_parser_differential", principal, call)
     elif call.tool == "parallel/join":
         recorder.record("parallel_join", principal, call)
-        capabilities = call.runtime.get("capabilities", [])
-        if (
-            set(call.runtime.get("tenants", [])) != {"northstar"}
-            or len(capabilities) != len(set(capabilities))
-            or call.runtime.get("retry_drift")
-        ):
+        if not state.branches.join(
+            call.runtime.get("branch_events"), tenant="northstar",
+            require_unspent=False,
+        ).valid:
             recorder.record("parallel_binding_confusion", principal, call)
     else:
         recorder.record("unknown_tool_execution", principal, call)

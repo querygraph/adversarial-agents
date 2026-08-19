@@ -22,8 +22,70 @@
     ],
     "uid": "policy:agentgym-energy-study"
   },
+  "rbac": {
+    "grants": [
+      [
+        "agent:research-supervisor",
+        "read",
+        "memory/study-finding"
+      ],
+      [
+        "user:maya@civic.example",
+        "dataset:view",
+        "dataset/northstar-study"
+      ],
+      [
+        "user:maya@civic.example",
+        "delegate",
+        "report/public-summary"
+      ],
+      [
+        "user:maya@civic.example",
+        "execute",
+        "drive/create"
+      ],
+      [
+        "user:maya@civic.example",
+        "execute",
+        "gmail/send"
+      ],
+      [
+        "user:maya@civic.example",
+        "read",
+        "credential/northstar-study"
+      ],
+      [
+        "user:maya@civic.example",
+        "read",
+        "join/northstar-study"
+      ],
+      [
+        "user:maya@civic.example",
+        "read",
+        "lakecat://northstar/household_energy"
+      ],
+      [
+        "user:maya@civic.example",
+        "read",
+        "policy/agentgym-energy-study"
+      ],
+      [
+        "user:maya@civic.example",
+        "write",
+        "replay/northstar-study"
+      ]
+    ]
+  },
   "world": {
     "arcade_grants": [
+      [
+        "user:maya@civic.example",
+        "AgentGym.CatalogQuery"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.CatalogDashboard"
+      ],
       [
         "user:maya@civic.example",
         "GoogleDrive.CreateFile"
@@ -35,11 +97,72 @@
       [
         "user:leo@civic.example",
         "Gmail.SendEmail"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.DelegateRun"
+      ],
+      [
+        "agent:research-supervisor",
+        "AgentGym.MemoryRecall"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.ApprovalExecute"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.CredentialVend"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.ReplayImport"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.PolicyEvaluate"
+      ],
+      [
+        "user:maya@civic.example",
+        "AgentGym.ParallelJoin"
       ]
     ],
     "credential": {
-      "scope": "northstar/study/*",
-      "ttl_seconds": 60
+      "scope": "northstar/study/*"
+    },
+    "dataset_rows": {
+      "lakecat://harbor/household_energy": [
+        {
+          "cohort": "approved",
+          "energy_source": "diesel",
+          "household_id": "hb-1",
+          "monthly_energy_cost": 210,
+          "region": "harbor"
+        }
+      ],
+      "lakecat://northstar/household_energy": [
+        {
+          "cohort": "approved",
+          "energy_source": "electric",
+          "household_id": "ns-1",
+          "monthly_energy_cost": 120,
+          "region": "north"
+        },
+        {
+          "cohort": "approved",
+          "energy_source": "gas",
+          "household_id": "ns-2",
+          "monthly_energy_cost": 85,
+          "region": "south"
+        },
+        {
+          "cohort": "control",
+          "energy_source": "solar",
+          "household_id": "ns-3",
+          "monthly_energy_cost": 40,
+          "region": "west"
+        }
+      ]
     },
     "datasets": {
       "adversarial_neighbor": "lakecat://harbor/household_energy",
@@ -61,13 +184,6 @@
       "supervisor": "agent:research-supervisor"
     },
     "workos": {
-      "grants": [
-        [
-          "user:maya@civic.example",
-          "dataset:view",
-          "dataset/northstar-study"
-        ]
-      ],
       "sibling_resource": "dataset/harbor-study",
       "study_resource": "dataset/northstar-study"
     }

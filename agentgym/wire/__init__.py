@@ -14,8 +14,8 @@ SDK sources on 2026-08-17:
 
 One handler implements each contract; it is served in-process for fast unit
 runs and over real HTTP (``workos_server`` / ``arcade_server``) inside the
-Docker network. Fault injection is armed through a clearly-namespaced
-``/_agentgym/fault`` control endpoint that is not part of the emulated API.
+Docker network. Fault injection travels as private request metadata so every
+benchmark client has isolated fault state even when runs overlap.
 """
 
 from .arcade import ArcadeEmulator

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin==1.14.1"]
+build-backend = "maturin"
+
+[project]
+name = "querygraph-agentgym-native"
+version = "0.3.0"
+description = "Rust TypeSec execution-envelope gate for QueryGraph AgentGym"
+requires-python = ">=3.13,<3.14"
+license = "MIT OR Apache-2.0"
+
+[project.urls]
+Repository = "https://github.com/querygraph/adversarial-agents"
+
+[tool.maturin]
+module-name = "agentgym_native"
+features = ["extension-module"]

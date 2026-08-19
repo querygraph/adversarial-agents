@@ -3,50 +3,56 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-import typesec._native as typesec_native
-from typesec import validate
+import agentgym_native
 
 from agentgym.adapters import ADAPTERS
-from agentgym.model import Principal, ToolCall
+from agentgym.model import Principal, ToolCall, canonical_json
 from agentgym.policy import PolicyGate
 from agentgym.runner import run_benchmark
-from agentgym.scenarios import MAYA
-from agentgym.typesec_native import gates
+from agentgym.scenarios import GOOD_QUERY, MAYA
+from agentgym.typesec_native import _odrl_translation, check_rust_gate, gate
+from agentgym.world import WORLD
 from agentgym.wire import ArcadeClient, WorkOSClient
 from agentgym.wire.arcade import ArcadeEmulator
 from agentgym.wire.workos import WorkOSEmulator
 
 
 def test_protected_track_uses_loaded_rust_extension() -> None:
-    tool_gate, odrl_gate = gates()
-    assert tool_gate.__class__ is typesec_native.ToolGate
-    assert odrl_gate.__class__ is typesec_native.TypesecGate
-    decision = tool_gate.check_tool(
-        MAYA.subject, "catalog/query",
-        '{"__resource":"lakecat://northstar/household_energy"}',
-        "energy-assistance-research",
-    )
+    native_gate = gate()
+    assert native_gate.__class__ is agentgym_native.AgentGymGate
+    decision = check_rust_gate(MAYA, GOOD_QUERY)
     assert decision.allowed
 
 
 def test_rust_tool_gate_denies_unbound_tool() -> None:
-    tool_gate, _ = gates()
-    decision = tool_gate.check_tool(MAYA.subject, "unknown/admin", "{}")
+    call = ToolCall("unknown/admin", "execute", "admin/root", {"confusable": True})
+    decision = gate().check(
+        MAYA.subject, call.tool, call.action, call.resource, call.purpose,
+        canonical_json(call.envelope(MAYA)),
+        call.digest(MAYA),
+    )
     assert not decision.allowed
-    assert "no typesec binding" in decision.reason
+    assert "no TypeSec binding" in decision.reason
 
 
 def test_real_odrl_gate_does_not_treat_missing_purpose_as_permission() -> None:
-    _, odrl_gate = gates()
-    decision = odrl_gate.check(
-        MAYA.subject, "read", "lakecat://northstar/household_energy"
+    call = ToolCall(
+        "catalog/query", "read", WORLD.approved_dataset,
+        {"columns": sorted(WORLD.allowed_columns), "predicate": WORLD.row_predicate},
+    )
+    decision = gate().check(
+        MAYA.subject, call.tool, call.action, call.resource, call.purpose,
+        canonical_json(call.envelope(MAYA)), call.digest(MAYA),
     )
     assert not decision.allowed
 
 
 def test_real_typesec_policy_parser_rejects_malformed_policy() -> None:
     with pytest.raises(ValueError):
-        validate("roles: [", "rbac")
+        agentgym_native.AgentGymGate(
+            "roles: [", _odrl_translation(), '{"catalog/query":"read"}',
+            "org:civic-lab", WORLD.policy_digest,
+        )
 
 
 @pytest.mark.parametrize("fault", ["timeout", "malformed"])
@@ -103,6 +109,7 @@ def test_each_real_framework_runtime_executes_the_full_protected_corpus(framewor
     assert score.safety == 100.0
     assert score.utility == 100.0
     assert score.evidence_quality == 100.0
+    assert score.fail_closed == 100.0
 
 
 def test_sixteen_concurrent_protected_runs_remain_isolated() -> None:

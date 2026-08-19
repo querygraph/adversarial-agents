@@ -14,8 +14,6 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-import yaml
-
 from agentgym.runner import run_benchmark
 from agentgym.world import WORLD
 
@@ -27,24 +25,22 @@ def test_opa_data_document_is_current() -> None:
 
     on_disk = json.loads((ROOT / "policy/opa/data.json").read_text())
     assert on_disk == build(), "run scripts/build_opa_data.py after editing fixtures"
+    assert on_disk["rbac"]["grants"] == [
+        list(grant) for grant in sorted(WORLD.rbac_grants)
+    ]
+    assert "grants" not in on_disk["world"]["workos"]
 
 
-def test_cerbos_dataset_policy_matches_world_constants() -> None:
-    # The Cerbos policy hand-translates the world's constants; if the fixture
-    # changes and the policy does not, this fails — the drift a hand-authored
-    # competitor policy is prone to, made visible instead of silent.
-    text = (ROOT / "policy/cerbos/resource_policies/dataset.yaml").read_text()
-    policy = yaml.safe_load(text)
-    exprs = " ".join(
-        cond["expr"]
-        for rule in policy["resourcePolicy"]["rules"]
-        for cond in rule["condition"]["match"]["all"]["of"]
-    )
-    assert WORLD.approved_dataset in exprs
-    assert WORLD.allowed_purpose in exprs
-    assert WORLD.row_predicate in exprs
-    for column in WORLD.allowed_columns:
-        assert column in exprs
+def test_cerbos_policies_are_current_generated_translations() -> None:
+    from scripts.build_cerbos_policies import render
+
+    expected = render()
+    directory = ROOT / "policy/cerbos/resource_policies"
+    assert {path.name for path in directory.glob("*.yaml")} == set(expected)
+    for name, content in expected.items():
+        assert (directory / name).read_text() == content, (
+            "run scripts/build_cerbos_policies.py after editing the corpus"
+        )
 
 
 def _reachable(url: str) -> bool:
@@ -78,12 +74,12 @@ def test_opa_mode_blocks_request_visible_attacks_and_completes_benign() -> None:
 
 
 @requires_opa
-def test_opa_cannot_bind_execution_plane_invariants() -> None:
+def test_raw_opa_profile_does_not_receive_execution_plane_facts() -> None:
     report = run_benchmark(("pydantic-ai",), ("opa",))
     runtime_only = {"BG-06", "BG-09", "BG-12", "BG-13", "BG-14"}
     unsafe = {row.scenario for row in report.results if row.attack and not row.safe}
-    # These are the invariants a stateless decision point structurally cannot
-    # hold; the mode is expected to fail exactly here, and TypeSec to hold.
+    # These facts are deliberately absent from the raw profile. The separate
+    # opa-mediated profile tests OPA behind the common execution mediator.
     assert runtime_only <= unsafe
 
 
@@ -94,3 +90,32 @@ def test_cerbos_mode_matches_the_engine_thesis() -> None:
     runtime_only = {"BG-06", "BG-09", "BG-12", "BG-13", "BG-14"}
     unsafe = {row.scenario for row in report.results if row.attack and not row.safe}
     assert runtime_only <= unsafe
+
+
+@requires_opa
+def test_opa_with_common_mediator_binds_execution_facts() -> None:
+    score = run_benchmark(("pydantic-ai",), ("opa-mediated",)).scores[0]
+    assert score.safety == 100.0
+    assert score.utility == 100.0
+    assert score.binding_integrity == 100.0
+    assert score.evidence_quality == 100.0
+    assert score.fail_closed == 100.0
+
+
+@requires_cerbos
+def test_cerbos_with_common_mediator_binds_execution_facts() -> None:
+    score = run_benchmark(("pydantic-ai",), ("cerbos-mediated",)).scores[0]
+    assert score.safety == 100.0
+    assert score.utility == 100.0
+    assert score.binding_integrity == 100.0
+    assert score.evidence_quality == 100.0
+    assert score.fail_closed == 100.0
+
+
+@pytest.mark.parametrize("mode", ["opa-mediated", "cerbos-mediated"])
+def test_mediated_profiles_are_named_separately(mode: str) -> None:
+    # The service integration itself runs in Compose. This always-on guard
+    # prevents a report from silently folding mediated results into raw PDPs.
+    from agentgym.model import MODES
+
+    assert mode in MODES

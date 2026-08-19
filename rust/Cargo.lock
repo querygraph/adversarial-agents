@@ -438,6 +438,8 @@ dependencies = [
 [[package]]
 name = "typesec-core"
 version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b35b825ccb7481db6500ba6300666b30ee3f85c7c0428d3c80f2f0c719e5083f"
 dependencies = [
  "chrono",
  "glob",
