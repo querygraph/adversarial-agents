@@ -1,8 +1,36 @@
 roles:
-  - name: study_analyst
+  - name: maya_catalog_read
     permissions: [read]
     resources: ["lakecat://northstar/household_energy"]
+  - name: maya_dashboard_view
+    permissions: ["dataset:view"]
+    resources: ["dataset/northstar-study"]
+  - name: maya_saas_execute
+    permissions: [execute]
+    resources: ["drive/create", "gmail/send"]
+  - name: maya_delegate
+    permissions: [delegate]
+    resources: ["report/public-summary"]
+  - name: maya_auxiliary_read
+    permissions: [read]
+    resources:
+      - "credential/northstar-study"
+      - "policy/agentgym-energy-study"
+      - "join/northstar-study"
+  - name: maya_replay_write
+    permissions: [write]
+    resources: ["replay/northstar-study"]
+  - name: supervisor_memory_read
+    permissions: [read]
+    resources: ["memory/study-finding"]
 assignments:
   - subject: "user:maya@civic.example"
-    roles: [study_analyst]
-
+    roles:
+      - maya_catalog_read
+      - maya_dashboard_view
+      - maya_saas_execute
+      - maya_delegate
+      - maya_auxiliary_read
+      - maya_replay_write
+  - subject: "agent:research-supervisor"
+    roles: [supervisor_memory_read]

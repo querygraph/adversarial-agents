@@ -28,8 +28,17 @@ import json
 from dataclasses import dataclass, field
 
 from ..world import WORLD
+from .protocol import request_fault
 
 API_KEY = "sk_agentgym_deterministic"
+FAULTS = frozenset({
+    "timeout",
+    "malformed",
+    "stale_allow",
+    "wrong_resource",
+    "string_false",
+    "wrong_shape",
+})
 
 # Membership IDs the fixture publishes for each known subject.
 MEMBERSHIPS = {
@@ -60,10 +69,20 @@ class WorkOSEmulator:
     revoked: set[tuple[str, str, str, str]] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        for subject, permission, resource in WORLD.workos_grants:
+        for subject, permission, resource in WORLD.rbac_grants:
             membership = MEMBERSHIPS[subject]
             resource_type, external_id = resource.split("/", 1)
-            self.assignments.add((membership, permission, resource_type, external_id))
+            # WorkOS permission slugs are a provider namespace projected from
+            # the canonical RBAC action, never a second authored grant table.
+            self.assignments.add(
+                (membership, f"agentgym:{permission}", resource_type, external_id)
+            )
+            if permission == "dataset:view":
+                # The native floor intentionally checks its historical broad
+                # dashboard entitlement; retain that alias mechanically too.
+                self.assignments.add(
+                    (membership, permission, resource_type, external_id)
+                )
 
     def arm_fault(self, fault: str | None) -> None:
         self.fault = fault
@@ -71,9 +90,10 @@ class WorkOSEmulator:
     def handle(self, method: str, path: str, headers: dict[str, str],
                body: bytes) -> Response:
         if path.startswith("/_agentgym/fault"):
-            payload = json.loads(body or b"{}")
-            self.arm_fault(payload.get("fault"))
-            return Response(200, {"armed": self.fault})
+            return Response(410, {
+                "message": "global fault endpoint disabled; use request metadata",
+                "code": "global_fault_state_disabled",
+            })
         if path.startswith("/fga/v1/"):
             return Response(410, {
                 "message": "The Warrant-derived FGA API was deprecated on "
@@ -82,9 +102,13 @@ class WorkOSEmulator:
             })
         if headers.get("Authorization") != f"Bearer {API_KEY}":
             return Response(401, {"message": "Unauthorized", "code": "unauthorized"})
-        if self.fault == "timeout":
+        try:
+            fault = request_fault(headers, default=self.fault, allowed=FAULTS)
+        except ValueError as exc:
+            return Response(400, {"message": str(exc), "code": "invalid_fault"})
+        if fault == "timeout":
             return Response(-1, None)  # transport layer sleeps past deadline
-        if self.fault == "malformed":
+        if fault == "malformed":
             return Response(200, None, raw=b"<html>bad gateway</html>")
         parts = path.strip("/").split("/")
         if (
@@ -93,10 +117,12 @@ class WorkOSEmulator:
             and parts[1] == "organization_memberships"
             and parts[3] == "check"
         ):
-            return self._check(parts[2], json.loads(body or b"{}"))
+            return self._check(parts[2], json.loads(body or b"{}"), fault)
         return Response(404, {"message": "Not found", "code": "not_found"})
 
-    def _check(self, membership_id: str, payload: dict) -> Response:
+    def _check(
+        self, membership_id: str, payload: dict, fault: str | None,
+    ) -> Response:
         slug = payload.get("permission_slug")
         external_id = payload.get("resource_external_id")
         type_slug = payload.get("resource_type_slug")
@@ -106,11 +132,24 @@ class WorkOSEmulator:
                 "code": "invalid_request",
             })
         key = (membership_id, slug, type_slug, external_id)
-        if self.fault == "wrong_resource":
+        if fault == "wrong_resource":
             # A correct-looking allow computed against a different resource:
             # the classic confused-deputy provider bug.
             key = (membership_id, slug, type_slug, "northstar-study")
         authorized = key in self.assignments
-        if key in self.revoked:
-            authorized = self.fault == "stale_allow"
+        membership = MEMBERSHIPS["user:maya@civic.example"]
+        resource_type, external_id = WORLD.study_resource.split("/", 1)
+        stale_targets = {
+            (membership, "dataset:view", resource_type, external_id),
+            (membership, "agentgym:dataset:view", resource_type, external_id),
+        }
+        provider_revoked = key in self.revoked or (
+            fault == "stale_allow" and key in stale_targets
+        )
+        if provider_revoked:
+            authorized = fault == "stale_allow"
+        if fault == "string_false":
+            return Response(200, {"authorized": "false"})
+        if fault == "wrong_shape":
+            return Response(200, [])  # type: ignore[arg-type]
         return Response(200, {"authorized": bool(authorized)})

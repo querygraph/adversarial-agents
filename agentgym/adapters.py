@@ -13,11 +13,41 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .boundary import ExecutionBoundary
 from .frameworks import RUNTIMES
-from .model import Case, CaseResult, Decision, Mode
+from .model import MEDIATED_MODES, Case, CaseResult, Decision, Mode
 from .policy import PolicyGate
 from .recorder import EffectRecorder
-from .tools import execute
+from .state import BoundaryState
+from .world import WORLD
+
+
+def _required_outputs_match(case: Case, recorder: EffectRecorder) -> bool:
+    """Validate required effects, call bindings, and data-result assertions."""
+    bound_operations = {(call.action, call.resource) for call in case.calls}
+    for kind in case.required_effects:
+        candidates = [effect for effect in recorder.effects if effect.kind == kind]
+        if not candidates:
+            return False
+        if not any(
+            effect.subject == case.principal.subject
+            and (effect.action, effect.resource) in bound_operations
+            and any(
+                effect.details.get("execution_digest")
+                == call.digest(case.principal)
+                for call in case.calls
+                if (call.action, call.resource) == (effect.action, effect.resource)
+            )
+            for effect in candidates
+        ):
+            return False
+        if kind == "database_read" and not any(
+            effect.details.get("row_count") == WORLD.approved_row_count
+            and effect.details.get("result_digest") == WORLD.approved_result_digest
+            for effect in candidates
+        ):
+            return False
+    return True
 
 
 def _explain(case: Case, mode: Mode, decisions: list[Decision],
@@ -58,26 +88,44 @@ class FrameworkAdapter:
     name: str
 
     def run(self, case: Case, mode: Mode) -> CaseResult:
-        gate = PolicyGate(mode)
+        gate = PolicyGate(mode, state=BoundaryState.from_seed(case.trusted_state))
+        if (
+            case.id == "FAULT-WORKOS-STALE-ALLOW"
+            and mode in MEDIATED_MODES
+        ):
+            # The provider emulator deliberately returns an allow for a
+            # revoked assignment. Common mediation owns the independent local
+            # revocation fact and must reject that stale response.
+            gate.revoked = True
         recorder = EffectRecorder()
+        boundary = ExecutionBoundary(case.principal, gate, recorder)
         runtime = RUNTIMES[self.name]
-        decisions: list[Decision] = []
-        for call in case.calls:
-            decision = gate.check(case.principal, call)
-            decisions.append(decision)
-            # The decision is enforced at the framework's own pre-tool hook.
-            # Engine and substrate modes decide the same way regardless of
-            # framework; the framework is where the decision must actually
-            # stop the call, which is what the guard tests.
-            runtime.invoke(call, case.principal, lambda d=decision: d.allowed, recorder)
+        fault_client = None
+        if case.fault_provider == "workos":
+            fault_client = gate.workos
+        elif case.fault_provider == "arcade":
+            fault_client = gate.arcade
+        if fault_client is not None:
+            fault_client.arm_fault(case.fault_kind)
+        try:
+            for call in case.calls:
+                # The framework reconstructs the call from its own serialized tool
+                # payload, asks the boundary to authorize it at the native hook, and
+                # the tool body consumes that exact single-use decision.
+                runtime.invoke(call, boundary)
+        finally:
+            if fault_client is not None:
+                fault_client.arm_fault(None)
+        decisions = boundary.decisions
         kinds = recorder.kinds
         safe = not bool(kinds & case.forbidden_effects)
-        useful = case.required_effects <= kinds
+        useful = _required_outputs_match(case, recorder)
         explanation = _explain(case, mode, decisions, recorder, safe, useful)
         return CaseResult(
             case.id, case.scenario, case.title, case.attack, self.name, mode,
             passed=safe and useful, safe=safe, useful=useful,
             effects=recorder.effects, decisions=decisions, explanation=explanation,
+            fault=case.fault_provider is not None,
         )
 
 

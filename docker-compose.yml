@@ -1,12 +1,12 @@
 # The full AgentGym matrix on one network, mirroring how catalog-bench and
 # adversarial-cognition run: the benchmark image plus every competitor
 # enforcement engine and both provider emulators as sidecars. `docker
-# compose run --rm bench` runs the four-mode matrix against live OPA,
+# compose run --rm bench` runs the eight-profile matrix against live OPA,
 # Cerbos, and the wire-faithful WorkOS/Arcade emulators.
 
 services:
   opa:
-    image: openpolicyagent/opa:1.19.1
+    image: openpolicyagent/opa:1.19.1@sha256:378b7db7218985444b7bc14f0b0f5b05c864b9481fe470e133654a7fc084072c
     command:
       - "run"
       - "--server"
@@ -16,13 +16,18 @@ services:
     volumes:
       - ./policy/opa:/policies:ro
     healthcheck:
-      test: ["CMD", "opa", "version"]
+      test:
+        - "CMD"
+        - "opa"
+        - "eval"
+        - "--fail"
+        - "http.send({\"method\":\"get\",\"url\":\"http://127.0.0.1:8181/health\"}).status_code == 200"
       interval: 3s
       timeout: 2s
       retries: 10
 
   cerbos:
-    image: ghcr.io/cerbos/cerbos:0.55.0
+    image: ghcr.io/cerbos/cerbos:0.55.0@sha256:4b9d3b58c4f11c1b8953bc798d8d086e64f276882253ab169625fddc7f432515
     command: ["server", "--config=/config/cerbos.yaml"]
     volumes:
       - ./policy/cerbos/resource_policies:/policies:ro
@@ -41,6 +46,16 @@ services:
     command: ["workos"]
     environment:
       AGENTGYM_WORKOS_PORT: "8280"
+    healthcheck:
+      test:
+        - "CMD"
+        - "/work/adversarial-agents/.venv/bin/python"
+        - "-c"
+        - "import http.client; c=http.client.HTTPConnection('127.0.0.1',8280,timeout=1); c.request('GET','/'); assert c.getresponse().status == 401"
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
 
   arcade:
     image: agentgym:dev
@@ -48,6 +63,16 @@ services:
     command: ["arcade"]
     environment:
       AGENTGYM_ARCADE_PORT: "9099"
+    healthcheck:
+      test:
+        - "CMD"
+        - "/work/adversarial-agents/.venv/bin/python"
+        - "-c"
+        - "import http.client; c=http.client.HTTPConnection('127.0.0.1',9099,timeout=1); c.request('GET','/'); assert c.getresponse().status == 401"
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
 
   bench:
     image: agentgym:dev
@@ -58,12 +83,20 @@ services:
       cerbos:
         condition: service_healthy
       workos:
-        condition: service_started
+        condition: service_healthy
       arcade:
-        condition: service_started
+        condition: service_healthy
     environment:
+      AGENTGYM_GIT_COMMIT: "${AGENTGYM_GIT_COMMIT:-unknown}"
+      AGENTGYM_GIT_DIRTY: "${AGENTGYM_GIT_DIRTY:-true}"
+      AGENTGYM_IMAGE_ID: "${AGENTGYM_IMAGE_ID:-unreported}"
+      AGENTGYM_TYPESEC_REVISION: "typesec-core@0.13.1;typesec-rbac@0.13.1;typesec-odrl@0.13.1;querygraph-agentgym-native@0.3.0"
       AGENTGYM_OPA_URL: "http://opa:8181"
+      AGENTGYM_OPA_VERSION: "1.19.1@sha256:378b7db7218985444b7bc14f0b0f5b05c864b9481fe470e133654a7fc084072c"
       AGENTGYM_CERBOS_URL: "http://cerbos:3592"
+      AGENTGYM_CERBOS_VERSION: "0.55.0@sha256:4b9d3b58c4f11c1b8953bc798d8d086e64f276882253ab169625fddc7f432515"
       AGENTGYM_WORKOS_URL: "http://workos:8280"
+      AGENTGYM_WORKOS_VERSION: "agentgym-emulator/0.3.0"
       AGENTGYM_ARCADE_URL: "http://arcade:9099"
+      AGENTGYM_ARCADE_VERSION: "agentgym-emulator/0.3.0"
     command: ["benchmark", "--mode", "all", "--json"]

@@ -1,0 +1,23 @@
+[package]
+name = "querygraph-agentgym-native"
+version = "0.3.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "agentgym_native"
+crate-type = ["cdylib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+base64 = "=0.22.1"
+hmac = "=0.12.1"
+pyo3 = "=0.25.1"
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+typesec-core = "=0.13.1"
+typesec-rbac = { version = "=0.13.1", default-features = false }
+typesec-odrl = "=0.13.1"

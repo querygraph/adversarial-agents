@@ -4,125 +4,114 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from typing import Any
 
-from typesec import ToolGate, TypesecGate
+from .bindings import TOOL_ACTIONS, CallSchemaError, validate_bound_call
+from .model import Decision, Principal, ToolCall, canonical_json
+from .world import WORLD
 
-from .model import Decision, Principal, ToolCall
 
-RBAC = """
-roles:
-  - name: analyst
-    permissions: [read, write, execute, delegate]
-    resources:
-      - lakecat://northstar/household_energy
-      - dataset/northstar-study
-      - drive/create
-      - gmail/send
-      - memory/study-finding
-      - report/public-summary
-      - credential/northstar-study
-      - replay/northstar-study
-      - policy/agentgym-energy-study
-      - join/northstar-study
-  - name: supervisor
-    permissions: [read, write, execute]
-    resources: [memory/study-finding, report/public-summary]
-assignments:
-  - subject: user:maya@civic.example
-    roles: [analyst]
-  - subject: agent:research-supervisor
-    roles: [supervisor]
-"""
-
-ODRL = """
-policies:
-  - uid: policy:agentgym-read
-    type: Set
-    rules:
-      - type: permission
-        assignee: user:maya@civic.example
-        action: read
-        target: lakecat://northstar/household_energy
-        constraints:
-          - leftOperand: purpose
-            operator: eq
-            rightOperand: energy-assistance-research
-      - type: prohibition
-        assignee: user:maya@civic.example
-        action: exfiltrate
-        target: lakecat://northstar/household_energy
-"""
-
-TOOLS = (
-    "catalog/query", "catalog/dashboard", "drive/create", "gmail/send",
-    "delegate/run", "memory/recall", "approval/execute", "unknown/admin",
-    "credential/vend", "replay/import", "policy/evaluate", "parallel/join",
-)
-
-ACTION = {
-    "catalog/query": "read",
-    "catalog/dashboard": "read",
-    "drive/create": "execute",
-    "gmail/send": "execute",
-    "delegate/run": "delegate",
-    "memory/recall": "read",
-    "approval/execute": "execute",
-    "unknown/admin": "execute",
-    "credential/vend": "read",
-    "replay/import": "write",
-    "policy/evaluate": "read",
-    "parallel/join": "read",
-}
+def _odrl_translation() -> str:
+    """Derive TypeSec's ODRL carrier from the canonical checked-in corpus."""
+    source = json.loads(WORLD.odrl_policy)
+    permission = source["permission"]
+    constraints = permission["constraints"]
+    rules = [{
+        "type": "permission",
+        "assignee": permission["assignee"],
+        "action": permission["action"],
+        "target": permission["target"],
+        "constraints": [{
+            "leftOperand": "purpose",
+            "operator": "eq",
+            "rightOperand": constraints["purpose"],
+        }],
+    }]
+    # The canonical profile names one information-flow prohibition and two
+    # prohibited purposes. TypeSec's ODRL carrier has a typed ``exfiltrate``
+    # action; the purpose values are already excluded by the positive purpose
+    # constraint above. Keep this mapping explicit and reject corpus drift.
+    prohibitions = set(source["prohibitions"])
+    expected_prohibitions = {"exfiltrate-sensitive", "marketing", "train"}
+    if prohibitions != expected_prohibitions:
+        raise ValueError("canonical ODRL prohibitions require an updated translation")
+    rules.append({
+        "type": "prohibition",
+        "assignee": permission["assignee"],
+        "action": "exfiltrate",
+        "target": permission["target"],
+    })
+    document = {
+        "policies": [{
+            "uid": source["uid"],
+            "type": "Set",
+            "rules": rules,
+        }],
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
 
 
 @lru_cache(maxsize=1)
-def gates() -> tuple[ToolGate, TypesecGate]:
-    bindings = [
-        {
-            "tool": tool,
-            "action": ACTION[tool],
-            "resource": "unresolved",
-            "resource_arg": "__resource",
-            "required_args": "__resource",
-        }
-        for tool in TOOLS
-        if tool != "unknown/admin"
-    ]
-    return ToolGate(RBAC, bindings, "rbac"), TypesecGate(ODRL, "odrl")
+def gate() -> Any:
+    try:
+        from agentgym_native import AgentGymGate
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeError(
+            "AgentGym's Rust protected gate is not installed; install the "
+            "'typesec' extra or the matching querygraph-agentgym-native wheel"
+        ) from exc
+    return AgentGymGate(
+        WORLD.rbac_policy,
+        _odrl_translation(),
+        json.dumps(TOOL_ACTIONS, sort_keys=True, separators=(",", ":")),
+        "org:civic-lab",
+        WORLD.policy_digest,
+    )
+
+
+def gates() -> tuple[Any, Any]:
+    """Compatibility tuple: the unified native gate enforces RBAC and ODRL."""
+    unified = gate()
+    return unified, unified
 
 
 def check_rust_gate(principal: Principal, call: ToolCall) -> Decision:
     """Require the compiled Rust gate to approve the exact call first.
 
-    The PyO3 ToolGate decides tool binding and resource presence; for the
+    The PyO3 AgentGymGate, built on TypeSec's RBAC/ODRL engines, decides tool
+    binding and resource presence; for the
     governed catalog read the ODRL engine additionally decides the purpose
     constraint. Both run before any Python-side runtime binding, so an
     unbound tool, a missing resource argument, or a failed ODRL constraint
     is rejected by compiled Rust, not by the Python layer above it.
     """
-    tool_gate, odrl_gate = gates()
-    arguments = dict(call.args)
-    arguments["__resource"] = call.resource
-    verdict = tool_gate.check_tool(
+    try:
+        validate_bound_call(call)
+    except CallSchemaError as exc:
+        return Decision(False, f"closed call schema: {exc}",
+                        mechanism="rust-envelope", invariant="closed-schema")
+    request_digest = call.digest(principal)
+    verdict = gate().check(
         principal.subject,
         call.tool,
-        json.dumps(arguments, separators=(",", ":")),
+        call.action,
+        call.resource,
         call.purpose,
+        canonical_json(call.envelope(principal)),
+        request_digest,
     )
     if not verdict.allowed:
-        return Decision(False, f"Rust ToolGate: {verdict.reason}",
-                        mechanism="rust-toolgate", invariant="tool-binding")
-    if call.tool == "catalog/query":
-        odrl = odrl_gate.check(
-            principal.subject, call.action, call.resource, call.purpose
-        )
-        if not odrl.allowed:
-            return Decision(False, f"Rust ODRL gate: {odrl.reason}",
-                            mechanism="rust-odrl", invariant="purpose-binding")
-    return Decision(True, "Rust ToolGate and policy gate allowed exact call",
-                    mechanism="rust-toolgate", invariant="tool-binding")
+        return Decision(False, f"Rust AgentGymGate: {verdict.reason}",
+                        mechanism="rust-typesec-envelope",
+                        invariant="exact-envelope-binding",
+                        request_digest=verdict.request_digest,
+                        policy_digest=verdict.policy_digest)
+    return Decision(True, "Rust AgentGymGate validated the complete call envelope",
+                    mechanism="rust-typesec-envelope",
+                    invariant="exact-envelope-binding",
+                    request_digest=verdict.request_digest,
+                    policy_digest=verdict.policy_digest)
 
 
 # Retained for older imports.
 check_native = check_rust_gate
-

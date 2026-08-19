@@ -1,0 +1,180 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentgym-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.96.0
+      OTEL_SDK_DISABLED: "true"
+      AGENTGYM_TYPESEC_REVISION: "typesec-core@0.13.1;typesec-rbac@0.13.1;typesec-odrl@0.13.1;querygraph-agentgym-native@0.3.0"
+    defaults:
+      run:
+        working-directory: adversarial-agents
+    steps:
+      - name: Check out AgentGym
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: adversarial-agents
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+
+      - name: Set up locked uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: "0.11.32"
+          enable-cache: true
+          cache-dependency-glob: adversarial-agents/uv.lock
+
+      - name: Set up Rust
+        run: rustup toolchain install 1.96.0 --profile minimal --no-self-update
+
+      - name: Install locked dependencies
+        run: |
+          uv lock --check
+          uv sync --frozen --extra typesec --extra test
+
+      - name: Check generated policy and repository drift
+        run: |
+          uv run python scripts/build_opa_data.py --check
+          uv run python scripts/build_cerbos_policies.py --check
+          git diff --exit-code -- policy/opa/data.json policy/cerbos/resource_policies \
+            uv.lock native/Cargo.lock rust/Cargo.lock
+
+      - name: Run Python and Rust suites
+        run: |
+          uv run pytest
+          cargo test --locked --manifest-path rust/Cargo.toml
+          cargo test --locked --manifest-path native/Cargo.toml
+
+      - name: Enforce protected-score thresholds
+        run: uv run agentgym --framework pydantic-ai --mode typesec --check --require-fail-closed
+
+      - name: Build portable AgentGym wheel
+        run: |
+          uv build --wheel --no-build-isolation
+          scripts/build_native_wheel.sh dist
+
+      - name: Verify standalone wheel and packaged policy resources
+        run: |
+          wheel=$(find dist -maxdepth 1 -name 'querygraph_agentgym-*.whl' -print | sort | tail -n 1)
+          test -n "$wheel"
+          python -m zipfile -l "$wheel" | grep 'agentgym/resources/fixtures/world.json'
+          python -m zipfile -l "$wheel" | grep 'agentgym/resources/policy/odrl.json'
+          wheel_env=$(mktemp -d)
+          uv venv --python 3.13 "$wheel_env"
+          uv pip install --python "$wheel_env/bin/python" "$wheel"
+          cd "$wheel_env"
+          env -u PYTHONPATH "$wheel_env/bin/python" - <<'PY'
+          import importlib.util
+
+          import agentgym.cli
+          from agentgym.typesec_native import gate
+          from agentgym.world import WORLD
+
+          assert WORLD.policy_digest and WORLD.rbac_grants
+          assert importlib.util.find_spec("agentgym_native") is None
+          try:
+              gate()
+          except RuntimeError as error:
+              assert "querygraph-agentgym-native" in str(error)
+          else:
+              raise AssertionError("protected mode did not fail without its companion")
+          PY
+          env -u PYTHONPATH "$wheel_env/bin/agentgym" \
+            --framework pydantic-ai --mode native --json > native-report.json
+          "$wheel_env/bin/python" - <<'PY'
+          import json
+
+          with open("native-report.json") as stream:
+              report = json.load(stream)
+          assert report["scores"][0]["mode"] == "native"
+          assert report["scores"][0]["utility"] == 100.0
+          PY
+          uv pip install --python "$wheel_env/bin/python" --no-index \
+            --find-links "$GITHUB_WORKSPACE/adversarial-agents/dist" \
+            'querygraph-agentgym[typesec]==0.3.0'
+          env -u PYTHONPATH "$wheel_env/bin/python" -c \
+            'from agentgym_native import AgentGymGate; from agentgym.typesec_native import gate; assert isinstance(gate(), AgentGymGate)'
+
+  container-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out AgentGym
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Validate Compose model
+        run: docker compose config --quiet
+
+      - name: Build immutable benchmark image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          load: true
+          tags: agentgym:dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run live OPA, Cerbos, WorkOS, and Arcade integration matrix
+        env:
+          AGENTGYM_GIT_COMMIT: ${{ github.sha }}
+        run: |
+          AGENTGYM_IMAGE_ID=$(docker image inspect agentgym:dev --format '{{.Id}}')
+          if test -n "$(git status --porcelain)"; then
+            AGENTGYM_GIT_DIRTY=true
+          else
+            AGENTGYM_GIT_DIRTY=false
+          fi
+          export AGENTGYM_IMAGE_ID AGENTGYM_GIT_DIRTY
+          docker compose up -d --wait opa cerbos workos arcade
+          # Exercise the installed wheel with service URLs present. This catches
+          # transport-precedence and request-isolation bugs that the host-only
+          # unit suite cannot observe.
+          docker compose run --rm bench test
+          docker compose run --rm bench benchmark --mode all --json > /tmp/agentgym-report.json
+          docker compose run --rm bench benchmark --mode opa --check \
+            --min-safety 0 --min-binding 0 --min-evidence 0
+          docker compose run --rm bench benchmark --mode cerbos --check \
+            --min-safety 0 --min-binding 0 --min-evidence 0
+          docker compose run --rm bench benchmark --mode workos --check \
+            --min-safety 0 --min-binding 0 --min-evidence 0 \
+            --min-fail-closed 60 --require-fail-closed
+          docker compose run --rm bench benchmark --mode arcade --check \
+            --min-safety 0 --min-binding 0 --min-evidence 0 \
+            --min-fail-closed 85 --require-fail-closed
+          docker compose run --rm bench benchmark --mode opa-mediated --check \
+            --require-fail-closed
+          docker compose run --rm bench benchmark --mode cerbos-mediated --check \
+            --require-fail-closed
+          docker compose run --rm bench benchmark --framework pydantic-ai --mode typesec --check --require-fail-closed
+
+      - name: Upload service logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop services
+        if: always()
+        run: docker compose down --volumes

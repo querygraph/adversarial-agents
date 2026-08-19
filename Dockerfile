@@ -1,68 +1,54 @@
-# AgentGym: the full deterministic matrix in one container.
-#
-# Two stages. The builder compiles the typesec PyO3 wheel once — typesec is
-# not on PyPI, and its workspace manifest references the grust sibling repo,
-# so both are cloned at the exact revisions the published results were
-# measured against. The runtime stage installs that prebuilt wheel plus the
-# framework deps, with no Rust toolchain and no sibling checkouts, so it is
-# slim and its build is fast once the builder layer is cached. See
-# docs/DOCKER.md for why the wheel is built rather than pulled.
+# syntax=docker/dockerfile:1.7
+# Reproducible AgentGym image: immutable base images, repository-local Rust
+# source, Cargo/uv locks, and a prebuilt protected-gate companion wheel.
 
-# ---- stage 1: build the typesec wheel ---------------------------------------
-FROM python:3.13-bookworm AS wheel-builder
+# This digest freezes maturin 1.14.1 and its complete Rust/Python build image.
+FROM ghcr.io/pyo3/maturin:v1.14.1@sha256:2665227312dd1eab1c29c70a001dc8aac53155a2d048bede3b2df7f1691c8e38 AS wheel-builder
 
-# Revisions the host build and the committed results were measured against.
-ARG TYPESEC_REV=669e105601c46aab0d11bcaaa4b06369f43bc934
-ARG TYPESEC_BRANCH=agent/performance-benchmarks
-ARG GRUST_REV=2698a0379da946df92e4db9457bd935b138b1c40
-ARG GRUST_BRANCH=agent/marciana-production-path
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential curl git pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.96.0
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN pip install --no-cache-dir "maturin>=1.8,<2"
+ARG TARGETARCH
 
 WORKDIR /src
-# typesec's Cargo workspace path-depends on grust; both must be present for
-# `cargo metadata` to resolve before maturin builds the extension.
-RUN git clone --branch "${GRUST_BRANCH}" https://github.com/querygraph/grust.git grust \
-    && git -C grust checkout "${GRUST_REV}"
-RUN git clone --branch "${TYPESEC_BRANCH}" https://github.com/querygraph/typesec.git typesec \
-    && git -C typesec checkout "${TYPESEC_REV}"
+COPY native ./native
 
-RUN --mount=type=cache,target=/src/typesec/target \
-    --mount=type=cache,target=/root/.cargo/registry \
-    maturin build --release \
-        --manifest-path typesec/crates/typesec-python/Cargo.toml \
+RUN --mount=type=cache,id=agentgym-native-target-${TARGETARCH},target=/src/native/target \
+    --mount=type=cache,id=agentgym-cargo-registry,target=/root/.cargo/registry \
+    maturin build --locked --release \
+        --interpreter /opt/python/cp313-cp313/bin/python \
+        --manifest-path native/Cargo.toml \
         --out /wheels
 
-# ---- stage 2: slim runtime with the prebuilt wheel --------------------------
-FROM python:3.13-bookworm
+# The tag documents the human-readable version; the digest makes it immutable.
+FROM python:3.13.7-bookworm@sha256:c900d35aba5fe4c1dc1cd358408baae2902ff2a2926a1d15cc5002c6061ddb2e
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.32@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c /uv /usr/local/bin/uv
 COPY --from=wheel-builder /wheels /wheels
 
 WORKDIR /work/adversarial-agents
-COPY pyproject.toml .python-version ./
+ENV OTEL_SDK_DISABLED=true \
+    AGENTGYM_TYPESEC_REVISION="typesec-core@0.13.1;typesec-rbac@0.13.1;typesec-odrl@0.13.1;querygraph-agentgym-native@0.3.0"
+COPY pyproject.toml uv.lock .python-version ./
 COPY agentgym ./agentgym
 COPY tests ./tests
 COPY policy ./policy
 COPY fixtures ./fixtures
 COPY scripts ./scripts
+COPY native ./native
 
-# Install the prebuilt typesec wheel, then the framework deps and agentgym
-# itself (no-deps, so the editable typesec source override in pyproject is
-# never consulted). One venv at /work/adversarial-agents/.venv.
-ENV UV_PROJECT_ENVIRONMENT=/work/adversarial-agents/.venv
-RUN uv venv "${UV_PROJECT_ENVIRONMENT}" \
-    && uv pip install /wheels/typesec-*.whl \
-    && uv pip install \
-        "crewai>=1.15,<2" "langchain>=1.3,<2" "langgraph>=1.2,<2" \
-        "pydantic-ai-slim>=2.31,<3" "pytest>=8" "pytest-asyncio>=1" "pyyaml>=6" \
-    && uv pip install --no-deps -e .
+# Export exact versions and hashes from the committed lock. The local native
+# package is omitted from registry sync because its exact wheel was built above.
+RUN uv export --frozen --extra typesec --extra test \
+        --no-emit-project --no-emit-package querygraph-agentgym-native \
+        --format requirements-txt --output-file /tmp/runtime.lock \
+    && uv venv /work/adversarial-agents/.venv \
+    && uv pip sync --python /work/adversarial-agents/.venv/bin/python \
+        --require-hashes /tmp/runtime.lock \
+    && uv pip install --python /work/adversarial-agents/.venv/bin/python \
+        --no-deps /wheels/querygraph_agentgym_native-0.3.0-*.whl \
+    && VIRTUAL_ENV=/work/adversarial-agents/.venv uv pip install \
+        --python /work/adversarial-agents/.venv/bin/python \
+        --no-build-isolation --no-deps . \
+    && /work/adversarial-agents/.venv/bin/python -c \
+        "from agentgym.world import WORLD; from agentgym_native import AgentGymGate; assert WORLD.policy_digest; assert AgentGymGate"
 
 ENTRYPOINT ["scripts/docker-entry.sh"]
 CMD ["benchmark"]

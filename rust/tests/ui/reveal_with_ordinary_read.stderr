@@ -9,7 +9,7 @@ error[E0308]: mismatched types
   = note: expected reference `&typesec_core::Capability<CanReadSensitive, GenericResource>`
              found reference `&typesec_core::Capability<CanRead, GenericResource>`
 note: method defined here
- --> $TYPESEC_CORE/src/secure_value.rs
+ --> $CARGO/typesec-core-$VERSION/src/secure_value.rs
   |
   |     pub fn reveal(
   |            ^^^^^^

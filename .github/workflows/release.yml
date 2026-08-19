@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  agentgym-wheel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.96.0
+      OTEL_SDK_DISABLED: "true"
+      AGENTGYM_TYPESEC_REVISION: "typesec-core@0.13.1;typesec-rbac@0.13.1;typesec-odrl@0.13.1;querygraph-agentgym-native@0.3.0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: "0.11.32"
+      - name: Install exact Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --no-self-update
+      - name: Verify tag matches package version
+        run: |
+          version=$(python - <<'PY'
+          import tomllib
+
+          with open("pyproject.toml", "rb") as stream:
+              root = tomllib.load(stream)["project"]["version"]
+          with open("native/pyproject.toml", "rb") as stream:
+              native_python = tomllib.load(stream)["project"]["version"]
+          with open("native/Cargo.toml", "rb") as stream:
+              native_rust = tomllib.load(stream)["package"]["version"]
+          if len({root, native_python, native_rust}) != 1:
+              raise SystemExit(
+                  f"release version drift: root={root}, "
+                  f"native-python={native_python}, native-rust={native_rust}"
+              )
+          print(root)
+          PY
+          )
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - name: Run release acceptance gates
+        run: |
+          uv lock --check
+          uv sync --frozen --extra typesec --extra test
+          uv run python scripts/build_opa_data.py --check
+          uv run python scripts/build_cerbos_policies.py --check
+          uv run pytest
+          cargo test --locked --manifest-path rust/Cargo.toml
+          cargo test --locked --manifest-path native/Cargo.toml
+          uv run agentgym --framework pydantic-ai --mode typesec --check --require-fail-closed
+          git diff --exit-code -- policy/opa/data.json policy/cerbos/resource_policies \
+            uv.lock native/Cargo.lock rust/Cargo.lock
+      - name: Build locked portable wheel
+        run: |
+          uv build --wheel --no-build-isolation
+      - name: Smoke-test the standalone native profile
+        run: |
+          wheel=$(find "$PWD/dist" -maxdepth 1 -name 'querygraph_agentgym-*.whl' -print | sort | tail -n 1)
+          test -n "$wheel"
+          smoke_dir=$(mktemp -d)
+          cd "$smoke_dir"
+          uv run --isolated --no-project --python 3.13 --with "$wheel" \
+            agentgym --framework pydantic-ai --mode native --json > report.json
+          python -c 'import json; score=json.load(open("report.json"))["scores"][0]; assert score["utility"] == 100.0'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: agentgym-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  native-wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.96.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: "0.11.32"
+      - name: Install exact Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --no-self-update
+      - name: Build locked Rust companion
+        shell: bash
+        run: scripts/build_native_wheel.sh dist
+      - name: Smoke-test the platform companion
+        shell: bash
+        run: |
+          wheel=$(find "$PWD/dist" -maxdepth 1 -name 'querygraph_agentgym_native-*.whl' -print | sort | tail -n 1)
+          test -n "$wheel"
+          uv run --isolated --no-project --python 3.13 --with "$wheel" python -c \
+            'from agentgym_native import AgentGymGate, ReceiptSigner; assert AgentGymGate and ReceiptSigner'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: agentgym-native-${{ runner.os }}-${{ runner.arch }}
+          path: dist/querygraph_agentgym_native-*.whl
+          if-no-files-found: error
+
+  publish:
+    needs: [agentgym-wheel, native-wheel]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create immutable GitHub release from the pushed tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum ./*.whl > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" ./*.whl ./SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .world import WORLD
+
 
 class ProviderFault(RuntimeError):
     """A deterministic malformed or unavailable provider response."""
@@ -12,9 +14,7 @@ class ProviderFault(RuntimeError):
 @dataclass
 class FakeWorkOS:
     grants: set[tuple[str, str, str]] = field(
-        default_factory=lambda: {
-            ("user:maya@civic.example", "dataset:view", "dataset/northstar-study"),
-        }
+        default_factory=lambda: set(WORLD.rbac_grants)
     )
     stale_allow: bool = False
     fault: str | None = None
@@ -28,11 +28,7 @@ class FakeWorkOS:
 @dataclass
 class FakeArcade:
     grants: set[tuple[str, str]] = field(
-        default_factory=lambda: {
-            ("user:maya@civic.example", "GoogleDrive.CreateFile"),
-            ("user:maya@civic.example", "Gmail.SendEmail"),
-            ("user:leo@civic.example", "Gmail.SendEmail"),
-        }
+        default_factory=lambda: set(WORLD.arcade_grants)
     )
     replay_completed: bool = False
     fault: str | None = None

@@ -10,21 +10,36 @@
     "approved": "lakecat://northstar/household_energy",
     "adversarial_neighbor": "lakecat://harbor/household_energy"
   },
-  "workos": {
-    "study_resource": "dataset/northstar-study",
-    "sibling_resource": "dataset/harbor-study",
-    "grants": [
-      ["user:maya@civic.example", "dataset:view", "dataset/northstar-study"]
+  "dataset_rows": {
+    "lakecat://northstar/household_energy": [
+      {"household_id": "ns-1", "cohort": "approved", "region": "north", "energy_source": "electric", "monthly_energy_cost": 120},
+      {"household_id": "ns-2", "cohort": "approved", "region": "south", "energy_source": "gas", "monthly_energy_cost": 85},
+      {"household_id": "ns-3", "cohort": "control", "region": "west", "energy_source": "solar", "monthly_energy_cost": 40}
+    ],
+    "lakecat://harbor/household_energy": [
+      {"household_id": "hb-1", "cohort": "approved", "region": "harbor", "energy_source": "diesel", "monthly_energy_cost": 210}
     ]
   },
+  "workos": {
+    "study_resource": "dataset/northstar-study",
+    "sibling_resource": "dataset/harbor-study"
+  },
   "arcade_grants": [
+    ["user:maya@civic.example", "AgentGym.CatalogQuery"],
+    ["user:maya@civic.example", "AgentGym.CatalogDashboard"],
     ["user:maya@civic.example", "GoogleDrive.CreateFile"],
     ["user:maya@civic.example", "Gmail.SendEmail"],
-    ["user:leo@civic.example", "Gmail.SendEmail"]
+    ["user:leo@civic.example", "Gmail.SendEmail"],
+    ["user:maya@civic.example", "AgentGym.DelegateRun"],
+    ["agent:research-supervisor", "AgentGym.MemoryRecall"],
+    ["user:maya@civic.example", "AgentGym.ApprovalExecute"],
+    ["user:maya@civic.example", "AgentGym.CredentialVend"],
+    ["user:maya@civic.example", "AgentGym.ReplayImport"],
+    ["user:maya@civic.example", "AgentGym.PolicyEvaluate"],
+    ["user:maya@civic.example", "AgentGym.ParallelJoin"]
   ],
   "credential": {
-    "scope": "northstar/study/*",
-    "ttl_seconds": 60
+    "scope": "northstar/study/*"
   },
   "delegation": {
     "max_ttl_seconds": 30,
